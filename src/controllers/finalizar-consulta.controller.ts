@@ -42,7 +42,9 @@ export class FinalizarConsultaController {
         return res.status(404).json({ success: false, error: 'Consulta no encontrada' });
       }
       
-      if (consulta.estado_consulta === 'finalizada' || consulta.estado_consulta === 'completada') {
+      // Permitir finalizar consultas en estado 'completada' (cuando el médico ya creó la historia médica)
+      // Solo rechazar si ya está 'finalizada'
+      if (consulta.estado_consulta === 'finalizada') {
         return res.status(400).json({ success: false, error: 'La consulta ya está finalizada' });
       }
       

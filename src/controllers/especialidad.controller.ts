@@ -6,9 +6,11 @@ export class EspecialidadController {
 
   async getAllEspecialidades(_req: Request, res: Response<ApiResponse>): Promise<void> {
     try {
+      // Obtener solo especialidades activas
       const { data: especialidades, error } = await supabase
         .from('especialidades')
         .select('*')
+        .eq('activa', true)
         .order('nombre_especialidad', { ascending: true });
 
       if (error) {
@@ -174,32 +176,152 @@ export class EspecialidadController {
       if (isNaN(especialidadId) || especialidadId <= 0) {
         const response: ApiResponse = {
           success: false,
-          error: { message: 'Invalid especialidad ID' }
+          error: { message: 'ID de especialidad inválido' }
         };
         res.status(400).json(response);
         return;
       }
 
+      // Verificar que la especialidad existe
+      const { data: especialidad, error: especialidadError } = await supabase
+        .from('especialidades')
+        .select('id, nombre_especialidad')
+        .eq('id', especialidadId)
+        .single();
+
+      if (especialidadError || !especialidad) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'Especialidad no encontrada' }
+        };
+        res.status(404).json(response);
+        return;
+      }
+
+      // Verificar si hay médicos asociados a esta especialidad
+      const { data: medicos, error: medicosError } = await supabase
+        .from('medicos')
+        .select('id')
+        .eq('especialidad_id', especialidadId)
+        .limit(1);
+
+      if (medicosError) {
+        console.error('Error verificando médicos:', medicosError);
+        const response: ApiResponse = {
+          success: false,
+          error: { 
+            message: `Error al verificar médicos asociados: ${medicosError.message}`,
+            code: 'DATABASE_ERROR'
+          }
+        };
+        res.status(500).json(response);
+        return;
+      }
+
+      if (medicos && medicos.length > 0) {
+        // Si hay médicos, verificar si tienen consultas para dar un mensaje más específico
+        const medicosIds = medicos.map(m => m.id);
+        const { data: consultas, error: consultasError } = await supabase
+          .from('consultas_pacientes')
+          .select('id')
+          .in('medico_id', medicosIds)
+          .limit(1);
+
+        if (consultasError) {
+          console.error('Error verificando consultas de médicos:', consultasError);
+          // Si hay error verificando consultas, igualmente no podemos eliminar porque hay médicos
+        }
+
+        // Si hay consultas, mencionarlo en el mensaje
+        const tieneConsultas = consultas && consultas.length > 0;
+        const mensaje = tieneConsultas
+          ? `No se puede eliminar la especialidad "${especialidad.nombre_especialidad}" porque tiene ${medicos.length} médico(s) asociado(s) con consultas registradas. Primero debe reasignar o eliminar los médicos y sus consultas asociadas.`
+          : `No se puede eliminar la especialidad "${especialidad.nombre_especialidad}" porque tiene ${medicos.length} médico(s) asociado(s). Primero debe reasignar o eliminar los médicos asociados.`;
+
+        const response: ApiResponse = {
+          success: false,
+          error: { 
+            message: mensaje,
+            code: 'HAS_ASSOCIATED_MEDICOS'
+          }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Verificar si hay servicios asociados a esta especialidad
+      const { data: servicios, error: serviciosError } = await supabase
+        .from('servicios')
+        .select('id')
+        .eq('especialidad_id', especialidadId)
+        .limit(1);
+
+      if (serviciosError) {
+        console.error('Error verificando servicios:', serviciosError);
+        const response: ApiResponse = {
+          success: false,
+          error: { 
+            message: `Error al verificar servicios asociados: ${serviciosError.message}`,
+            code: 'DATABASE_ERROR'
+          }
+        };
+        res.status(500).json(response);
+        return;
+      }
+
+      if (servicios && servicios.length > 0) {
+        const response: ApiResponse = {
+          success: false,
+          error: { 
+            message: `No se puede eliminar la especialidad "${especialidad.nombre_especialidad}" porque tiene servicios asociados. Primero debe eliminar o reasignar los servicios.`,
+            code: 'HAS_ASSOCIATED_SERVICIOS'
+          }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Si no hay relaciones, proceder con la eliminación
       const { error: deleteError } = await supabase
         .from('especialidades')
         .delete()
         .eq('id', especialidadId);
 
       if (deleteError) {
+        // Si hay un error de foreign key, proporcionar un mensaje más claro
+        if (deleteError.message.includes('foreign key') || deleteError.message.includes('constraint')) {
+          const response: ApiResponse = {
+            success: false,
+            error: { 
+              message: `No se puede eliminar la especialidad "${especialidad.nombre_especialidad}" porque tiene datos asociados (médicos, consultas o servicios).`,
+              code: 'FOREIGN_KEY_CONSTRAINT'
+            }
+          };
+          res.status(400).json(response);
+          return;
+        }
         throw new Error(`Database error: ${deleteError.message}`);
       }
 
       const response: ApiResponse = {
         success: true,
-        data: { message: 'Especialidad deleted successfully' }
+        data: { 
+          message: `Especialidad "${especialidad.nombre_especialidad}" eliminada exitosamente`,
+          accion: 'eliminado'
+        }
       };
       res.json(response);
     } catch (error) {
+      console.error('Error eliminando especialidad:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido al eliminar la especialidad';
       const response: ApiResponse = {
         success: false,
-        error: { message: (error as Error).message }
+        error: { 
+          message: errorMessage,
+          code: 'INTERNAL_ERROR'
+        }
       };
-      res.status(400).json(response);
+      res.status(500).json(response);
     }
   }
 

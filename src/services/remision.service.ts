@@ -314,6 +314,9 @@ export class RemisionService {
     try {
       console.log('🔍 Creando consulta desde remisión:', remision.id);
 
+      // Obtener clinica_alias desde variable de entorno
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'femimed';
+
       // Preparar datos de la consulta
              const consultaData = {
                paciente_id: remision.paciente_id,
@@ -327,7 +330,8 @@ export class RemisionService {
                duracion_estimada: 30,
                prioridad: 'normal' as const,
                observaciones: `Consulta generada automáticamente por remisión. ${remision.observaciones || ''}`,
-               recordatorio_enviado: false
+               recordatorio_enviado: false,
+               clinica_alias: clinicaAlias
              };
 
       console.log('🔍 Datos de consulta a crear:', consultaData);

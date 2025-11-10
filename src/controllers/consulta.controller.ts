@@ -335,17 +335,19 @@ export class ConsultaController {
         .from('consultas_pacientes')
         .select('*')
         .eq('fecha_pautada', fechaHoyVenezuela)
-        .in('estado_consulta', ['agendada', 'reagendada', 'en_progreso', 'por_agendar'])
+        .in('estado_consulta', ['agendada', 'reagendada', 'en_progreso', 'por_agendar', 'completada'])
         .order('hora_pautada', { ascending: true });
 
       // Si el usuario es médico, filtrar solo sus consultas
       if (user.rol === 'medico' && user.medico_id) {
         console.log('🔍 Filtrando consultas por médico_id:', user.medico_id);
         query = query.eq('medico_id', user.medico_id);
+      } else if (user.rol === 'administrador' || user.rol === 'secretaria') {
+        // Administrador y secretaria ven todas las consultas (incluyendo completadas)
+        console.log('🔍 Mostrando todas las consultas para', user.rol, '(incluyendo completadas)');
       } else {
-        console.log('🔍 Mostrando todas las consultas (administrador o sin médico_id)');
+        console.log('🔍 Mostrando todas las consultas (sin médico_id)');
       }
-      // Si es administrador, no aplicar filtro adicional (ver todas las consultas)
 
       const { data: consultas, error } = await query;
 
@@ -587,6 +589,10 @@ export class ConsultaController {
         return;
       }
 
+      // Validación básica: la restricción de BD (chk_fecha_pautada_futura) manejará
+      // la validación completa considerando la zona horaria de Venezuela
+      // Solo hacemos una validación básica de formato aquí
+
       const { data: consulta, error } = await supabase
         .from('consultas_pacientes')
         .update(updateData)
@@ -596,6 +602,19 @@ export class ConsultaController {
 
       if (error) {
         console.error('Error updating consulta:', error);
+        
+        // Manejar error de restricción de fecha
+        if (error.code === '23514' && error.message?.includes('chk_fecha_pautada_futura')) {
+          res.status(400).json({
+            success: false,
+            error: { 
+              message: 'La fecha de la consulta debe ser futura o igual a hoy. No se pueden programar consultas en fechas pasadas.',
+              code: 'INVALID_DATE'
+            }
+          } as ApiResponse<null>);
+          return;
+        }
+        
         res.status(500).json({
           success: false,
           error: { message: 'Error al actualizar consulta' }

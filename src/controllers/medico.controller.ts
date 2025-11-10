@@ -54,10 +54,11 @@ export class MedicoController {
 
   async getAllMedicos(_req: Request, res: Response<ApiResponse>): Promise<void> {
     try {
-      // Obtener médicos
+      // Obtener solo médicos activos
       const { data: medicos, error: medicosError } = await supabase
         .from('medicos')
         .select('*')
+        .eq('activo', true)
         .order('nombres', { ascending: true });
 
       if (medicosError) {
@@ -395,7 +396,22 @@ export class MedicoController {
         return;
       }
 
-      // Verificar si el médico tiene pacientes tratados
+      // Primero verificar si hay consultas no finalizadas
+      const { tieneConsultasNoFinalizadas, cantidad } = await this.verificarConsultasNoFinalizadas(medicoId);
+      
+      if (tieneConsultasNoFinalizadas) {
+        const response: ApiResponse = {
+          success: false,
+          error: { 
+            message: `No se puede desactivar el médico ${medico.nombres} ${medico.apellidos} porque tiene ${cantidad || 1} consulta(s) no finalizada(s). Debe finalizar todas las consultas antes de desactivar al médico.`,
+            code: 'HAS_UNFINISHED_CONSULTAS'
+          }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Verificar si el médico tiene pacientes tratados (consultas finalizadas, historial, informes)
       const tienePacientesTratados = await this.verificarPacientesTratados(medicoId);
 
       if (tienePacientesTratados) {
@@ -435,15 +451,45 @@ export class MedicoController {
   }
 
   /**
-   * Verifica si un médico tiene pacientes tratados
+   * Verifica si un médico tiene consultas no finalizadas
+   */
+  private async verificarConsultasNoFinalizadas(medicoId: number): Promise<{ tieneConsultasNoFinalizadas: boolean; cantidad?: number }> {
+    try {
+      // Verificar consultas no finalizadas
+      const { data: consultas, error: consultasError } = await supabase
+        .from('consultas_pacientes')
+        .select('id, estado_consulta')
+        .eq('medico_id', medicoId)
+        .not('estado_consulta', 'eq', 'finalizada')
+        .not('estado_consulta', 'eq', 'completada');
+
+      if (consultasError) {
+        console.error('Error verificando consultas no finalizadas:', consultasError);
+        throw new Error('Error verificando consultas no finalizadas del médico');
+      }
+
+      if (consultas && consultas.length > 0) {
+        return { tieneConsultasNoFinalizadas: true, cantidad: consultas.length };
+      }
+
+      return { tieneConsultasNoFinalizadas: false };
+    } catch (error) {
+      console.error('Error en verificarConsultasNoFinalizadas:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verifica si un médico tiene pacientes tratados (consultas finalizadas, historial, informes)
    */
   private async verificarPacientesTratados(medicoId: number): Promise<boolean> {
     try {
-      // Verificar consultas existentes
+      // Verificar consultas finalizadas (historial)
       const { data: consultas, error: consultasError } = await supabase
         .from('consultas_pacientes')
         .select('id')
         .eq('medico_id', medicoId)
+        .in('estado_consulta', ['finalizada', 'completada'])
         .limit(1);
 
       if (consultasError) {
@@ -528,6 +574,88 @@ export class MedicoController {
   }
 
   /**
+   * Activa un médico inactivo
+   */
+  async activarMedico(req: Request<{ id: string }, ApiResponse>, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const { id } = req.params;
+      const medicoId = parseInt(id);
+
+      if (isNaN(medicoId) || medicoId <= 0) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'ID de médico inválido' }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Verificar que el médico existe
+      const { data: medico, error: medicoError } = await supabase
+        .from('medicos')
+        .select('id, nombres, apellidos, activo')
+        .eq('id', medicoId)
+        .single();
+
+      if (medicoError || !medico) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'Médico no encontrado' }
+        };
+        res.status(404).json(response);
+        return;
+      }
+
+      // Verificar si el médico ya está activo
+      if (medico.activo) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'El médico ya está activo' }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Activar médico
+      const { error: updateError } = await supabase
+        .from('medicos')
+        .update({ activo: true })
+        .eq('id', medicoId);
+
+      if (updateError) {
+        throw new Error(`Error activando médico: ${updateError.message}`);
+      }
+
+      // Activar usuario asociado
+      const { error: usuarioError } = await supabase
+        .from('usuarios')
+        .update({ activo: true })
+        .eq('medico_id', medicoId);
+
+      if (usuarioError) {
+        console.warn('Advertencia: No se pudo activar el usuario:', usuarioError.message);
+        // No lanzamos error aquí porque el médico ya fue activado
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { 
+          message: `Médico ${medico.nombres} ${medico.apellidos} activado exitosamente`,
+          accion: 'activado'
+        }
+      };
+      res.json(response);
+    } catch (error) {
+      console.error('Error activando médico:', error);
+      const response: ApiResponse = {
+        success: false,
+        error: { message: (error as Error).message }
+      };
+      res.status(500).json(response);
+    }
+  }
+
+  /**
    * Elimina físicamente un médico del sistema
    */
   private async eliminarMedicoFisicamente(medicoId: number): Promise<void> {
@@ -576,10 +704,11 @@ export class MedicoController {
       // Escapar caracteres especiales para la búsqueda
       const searchTerm = q.trim();
 
-      // Construir query base
+      // Construir query base - solo médicos activos
       let query = supabase
         .from('medicos')
-        .select('*');
+        .select('*')
+        .eq('activo', true);
 
       // Si el término parece un email, buscar solo por email
       if (searchTerm.includes('@')) {
@@ -597,10 +726,11 @@ export class MedicoController {
         throw new Error(`Database error: ${medicosError.message}`);
       }
 
-      // Obtener especialidades
+      // Obtener solo especialidades activas
       const { data: especialidades, error: especialidadesError } = await supabase
         .from('especialidades')
-        .select('id, nombre_especialidad');
+        .select('id, nombre_especialidad')
+        .eq('activa', true);
 
       if (especialidadesError) {
         throw new Error(`Database error: ${especialidadesError.message}`);
@@ -656,6 +786,7 @@ export class MedicoController {
           )
         `)
         .eq('especialidad_id', id)
+        .eq('activo', true)
         .order('nombres', { ascending: true });
 
       if (error) {
