@@ -99,15 +99,53 @@ export class EspecialidadController {
         return;
       }
 
-      const clinicaAlias = process.env['CLINICA_ALIAS'];
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'femimed';
+      
+      // Crear la especialidad en la tabla especialidades (sin clinica_alias, ese campo está en especialidades_clinicas)
       const { data: newEspecialidad, error: createError } = await supabase
         .from('especialidades')
-        .insert({ nombre_especialidad, descripcion, clinica_alias: clinicaAlias })
+        .insert({ nombre_especialidad, descripcion })
         .select()
         .single();
 
       if (createError) {
         throw new Error(`Database error: ${createError.message}`);
+      }
+
+      // Crear el registro en especialidades_clinicas
+      if (newEspecialidad && newEspecialidad.id) {
+        // Verificar si ya existe un registro para evitar duplicados (restricción única)
+        const { data: existingRecord, error: checkError } = await supabase
+          .from('especialidades_clinicas')
+          .select('id')
+          .eq('especialidad_id', newEspecialidad.id)
+          .eq('clinica_alias', clinicaAlias)
+          .single();
+
+        if (checkError && checkError.code !== 'PGRST116') {
+          // PGRST116 es "no rows found", cualquier otro error es problemático
+          console.error('Error verificando especialidades_clinicas:', checkError);
+        }
+
+        // Solo insertar si no existe
+        if (!existingRecord) {
+          const { error: clinicaError } = await supabase
+            .from('especialidades_clinicas')
+            .insert({
+              especialidad_id: newEspecialidad.id,
+              clinica_alias: clinicaAlias,
+              activa: true // Activar por defecto
+            });
+
+          if (clinicaError) {
+            console.error('❌ Error insertando en especialidades_clinicas:', clinicaError);
+            // No fallar la creación de la especialidad, pero loguear el error
+          } else {
+            console.log('✅ Registro creado en especialidades_clinicas para especialidad:', newEspecialidad.id, 'clínica:', clinicaAlias);
+          }
+        } else {
+          console.log('ℹ️ Ya existe un registro en especialidades_clinicas para esta especialidad y clínica');
+        }
       }
 
       const response: ApiResponse = {
