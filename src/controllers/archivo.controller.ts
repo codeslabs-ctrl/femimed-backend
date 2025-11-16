@@ -5,6 +5,15 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 
+interface AuthenticatedRequest extends Request {
+  user?: {
+    userId: number;
+    username: string;
+    rol: string;
+    medico_id?: number;
+  };
+}
+
 // Configuración de multer para subida de archivos
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -44,7 +53,7 @@ export const uploadMiddleware = upload.array('archivos', 5); // Máximo 5 archiv
 
 export class ArchivoController {
   // Subir archivos (múltiples)
-  static async uploadArchivo(req: Request, res: Response): Promise<void> {
+  static async uploadArchivo(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const files = req.files as Express.Multer.File[];
       
@@ -74,10 +83,10 @@ export class ArchivoController {
         return;
       }
 
-      // Verificar que la historia existe
+      // Verificar que la historia existe y obtener información del médico
       const { data: historia, error: historiaError } = await supabase
         .from('historico_pacientes')
-        .select('id')
+        .select('id, medico_id')
         .eq('id', historia_id)
         .single();
 
@@ -87,6 +96,33 @@ export class ArchivoController {
           error: { message: 'Historia no encontrada' }
         });
         return;
+      }
+
+      // Verificar permisos: solo el médico dueño de la historia, administrador o secretaria pueden subir archivos
+      const user = req.user;
+      const userRol = user?.rol;
+      const userMedicoId = user?.medico_id;
+      const historiaMedicoId = historia.medico_id;
+
+      // Permitir a administradores y secretarias
+      if (userRol !== 'administrador' && userRol !== 'secretaria') {
+        // Si es médico, verificar que es el dueño de la historia
+        if (userRol === 'medico') {
+          if (!userMedicoId || userMedicoId !== historiaMedicoId) {
+            res.status(403).json({
+              success: false,
+              error: { message: 'No tiene permisos para subir archivos a esta historia médica. Solo el médico que creó la historia puede agregar archivos.' }
+            });
+            return;
+          }
+        } else {
+          // Otros roles no tienen permiso
+          res.status(403).json({
+            success: false,
+            error: { message: 'No tiene permisos para subir archivos' }
+          });
+          return;
+        }
       }
 
       // Parsear descripciones si vienen como JSON string
@@ -214,10 +250,65 @@ export class ArchivoController {
   }
 
   // Actualizar archivo
-  static async updateArchivo(req: Request, res: Response): Promise<void> {
+  static async updateArchivo(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const { descripcion } = req.body;
+
+      // Obtener el archivo y su historia asociada
+      const { data: archivo, error: archivoError } = await supabase
+        .from('archivos_anexos')
+        .select('id, historia_id')
+        .eq('id', id)
+        .eq('activo', true)
+        .single();
+
+      if (archivoError || !archivo) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Archivo no encontrado' }
+        });
+        return;
+      }
+
+      // Obtener la historia para verificar permisos
+      const { data: historia, error: historiaError } = await supabase
+        .from('historico_pacientes')
+        .select('medico_id')
+        .eq('id', archivo.historia_id)
+        .single();
+
+      if (historiaError || !historia) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Historia no encontrada' }
+        });
+        return;
+      }
+
+      // Verificar permisos
+      const user = req.user;
+      const userRol = user?.rol;
+      const userMedicoId = user?.medico_id;
+      const historiaMedicoId = historia.medico_id;
+
+      if (userRol !== 'administrador' && userRol !== 'secretaria') {
+        if (userRol === 'medico') {
+          if (!userMedicoId || userMedicoId !== historiaMedicoId) {
+            res.status(403).json({
+              success: false,
+              error: { message: 'No tiene permisos para actualizar este archivo' }
+            });
+            return;
+          }
+        } else {
+          res.status(403).json({
+            success: false,
+            error: { message: 'No tiene permisos para actualizar archivos' }
+          });
+          return;
+        }
+      }
 
       const { data, error } = await supabase
         .from('archivos_anexos')
@@ -253,9 +344,64 @@ export class ArchivoController {
   }
 
   // Eliminar archivo (marcar como inactivo)
-  static async deleteArchivo(req: Request, res: Response): Promise<void> {
+  static async deleteArchivo(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+
+      // Obtener el archivo y su historia asociada
+      const { data: archivo, error: archivoError } = await supabase
+        .from('archivos_anexos')
+        .select('id, historia_id')
+        .eq('id', id)
+        .eq('activo', true)
+        .single();
+
+      if (archivoError || !archivo) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Archivo no encontrado' }
+        });
+        return;
+      }
+
+      // Obtener la historia para verificar permisos
+      const { data: historia, error: historiaError } = await supabase
+        .from('historico_pacientes')
+        .select('medico_id')
+        .eq('id', archivo.historia_id)
+        .single();
+
+      if (historiaError || !historia) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Historia no encontrada' }
+        });
+        return;
+      }
+
+      // Verificar permisos
+      const user = req.user;
+      const userRol = user?.rol;
+      const userMedicoId = user?.medico_id;
+      const historiaMedicoId = historia.medico_id;
+
+      if (userRol !== 'administrador' && userRol !== 'secretaria') {
+        if (userRol === 'medico') {
+          if (!userMedicoId || userMedicoId !== historiaMedicoId) {
+            res.status(403).json({
+              success: false,
+              error: { message: 'No tiene permisos para eliminar este archivo' }
+            });
+            return;
+          }
+        } else {
+          res.status(403).json({
+            success: false,
+            error: { message: 'No tiene permisos para eliminar archivos' }
+          });
+          return;
+        }
+      }
 
       const { error } = await supabase
         .from('archivos_anexos')
