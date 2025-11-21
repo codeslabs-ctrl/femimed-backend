@@ -51,7 +51,15 @@ export class PDFService {
       });
 
       // Obtener firma digital del médico
+      console.log(`🔍 Obteniendo firma digital para médico ID: ${informe.medico_id}`);
       const firmaBase64 = await this.firmaService.obtenerFirmaBase64(informe.medico_id);
+      
+      if (firmaBase64) {
+        console.log(`✅ Firma digital obtenida exitosamente (${Math.round(firmaBase64.length / 1024)}KB)`);
+      } else {
+        console.warn(`⚠️ No se encontró firma digital para médico ID: ${informe.medico_id}`);
+        console.warn(`⚠️ El PDF se generará sin firma digital`);
+      }
       
       // Generar HTML para el PDF
       const htmlContent = await this.generarHTMLParaPDF(informe, firmaBase64);

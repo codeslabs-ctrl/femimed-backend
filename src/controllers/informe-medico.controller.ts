@@ -138,10 +138,31 @@ export class InformeMedicoController {
       const { id } = req.params;
       const informeId = parseInt(id!);
       const actualizaciones = req.body;
+      const usuario = (req as any).user;
 
       if (isNaN(informeId)) {
         res.status(400).json({ success: false, message: 'ID de informe inválido' });
         return;
+      }
+
+      // Verificar que el informe existe y obtener sus datos
+      const informeExistente = await informeMedicoService.obtenerInformePorId(informeId);
+      
+      if (!informeExistente) {
+        res.status(404).json({ success: false, message: 'Informe médico no encontrado' });
+        return;
+      }
+
+      // Validar permisos: si el usuario es médico, solo puede editar informes de sus pacientes
+      if (usuario?.rol === 'medico' && usuario?.medico_id) {
+        // Verificar que el informe pertenece a este médico
+        if (informeExistente.medico_id !== usuario.medico_id) {
+          res.status(403).json({ 
+            success: false, 
+            message: 'No tiene permisos para editar este informe. Solo puede editar informes de sus pacientes.' 
+          });
+          return;
+        }
       }
 
       const informe = await informeMedicoService.actualizarInforme(informeId, actualizaciones);

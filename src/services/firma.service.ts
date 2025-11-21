@@ -52,6 +52,7 @@ export class FirmaService {
    */
   async obtenerFirma(medicoId: number): Promise<string | null> {
     try {
+      console.log(`🔍 Buscando firma digital en BD para médico ID: ${medicoId}`);
       const { data: medico, error } = await supabase
         .from('medicos')
         .select('firma_digital')
@@ -59,11 +60,22 @@ export class FirmaService {
         .single();
       
       if (error) {
-        console.error('❌ Error obteniendo firma:', error);
+        console.error('❌ Error obteniendo firma desde BD:', error);
         return null;
       }
       
-      return medico?.firma_digital || null;
+      if (!medico) {
+        console.warn(`⚠️ Médico con ID ${medicoId} no encontrado en BD`);
+        return null;
+      }
+      
+      if (!medico.firma_digital) {
+        console.warn(`⚠️ Médico ID ${medicoId} no tiene firma_digital registrada en BD`);
+        return null;
+      }
+      
+      console.log(`✅ Ruta de firma encontrada en BD: ${medico.firma_digital}`);
+      return medico.firma_digital;
     } catch (error) {
       console.error('❌ Error en obtenerFirma:', error);
       return null;
@@ -97,11 +109,17 @@ export class FirmaService {
    */
   async obtenerFirmaBase64(medicoId: number): Promise<string> {
     try {
+      console.log(`🔍 [obtenerFirmaBase64] Iniciando para médico ID: ${medicoId}`);
+      console.log(`🔍 [obtenerFirmaBase64] __dirname: ${__dirname}`);
+      console.log(`🔍 [obtenerFirmaBase64] process.cwd(): ${process.cwd()}`);
+      
       const firmaPath = await this.obtenerFirma(medicoId);
       if (!firmaPath) {
-        console.warn(`⚠️ No se encontró ruta de firma para médico ${medicoId}`);
+        console.warn(`⚠️ [obtenerFirmaBase64] No se encontró ruta de firma para médico ${medicoId}`);
         return '';
       }
+      
+      console.log(`🔍 [obtenerFirmaBase64] Ruta de firma desde BD: ${firmaPath}`);
       
       // Resolver la ruta considerando que el código puede estar en dist/ o en src/
       // firmaPath viene como "/assets/firmas/medico_112_firma.png"
@@ -110,34 +128,43 @@ export class FirmaService {
       // Si __dirname está en dist/, buscar en dist/assets
       // Si __dirname está en src/, buscar en assets (raíz del proyecto)
       const isCompiled = __dirname.includes('dist');
+      console.log(`🔍 [obtenerFirmaBase64] Código compilado: ${isCompiled}`);
       
       if (isCompiled) {
         // Código compilado: buscar en dist/assets/firmas/
+        // __dirname = dist/services, entonces dist/assets = __dirname/../assets
         const distPath = path.join(__dirname, '..', 'assets', 'firmas', path.basename(firmaPath));
         fullPath = distPath;
+        console.log(`🔍 [obtenerFirmaBase64] Ruta esperada (compilado): ${fullPath}`);
       } else {
         // Código fuente: buscar en assets/ (raíz del proyecto)
         fullPath = path.join(process.cwd(), firmaPath);
+        console.log(`🔍 [obtenerFirmaBase64] Ruta esperada (desarrollo): ${fullPath}`);
       }
       
       // Si no existe en la ubicación esperada, intentar en la otra ubicación como fallback
       if (!fs.existsSync(fullPath)) {
+        console.warn(`⚠️ [obtenerFirmaBase64] Archivo no encontrado en ruta principal: ${fullPath}`);
+        
         const fallbackPath = isCompiled 
           ? path.join(process.cwd(), 'assets', 'firmas', path.basename(firmaPath))
           : path.join(__dirname, '..', '..', 'assets', 'firmas', path.basename(firmaPath));
         
+        console.log(`🔍 [obtenerFirmaBase64] Intentando ruta alternativa: ${fallbackPath}`);
+        
         if (fs.existsSync(fallbackPath)) {
-          console.log(`✅ Firma encontrada en ubicación alternativa: ${fallbackPath}`);
+          console.log(`✅ [obtenerFirmaBase64] Firma encontrada en ubicación alternativa: ${fallbackPath}`);
           fullPath = fallbackPath;
         } else {
-          console.warn(`⚠️ Archivo de firma no encontrado en ninguna ubicación:`);
-          console.warn(`   - Intento 1: ${fullPath}`);
-          console.warn(`   - Intento 2: ${fallbackPath}`);
+          console.error(`❌ [obtenerFirmaBase64] Archivo de firma no encontrado en ninguna ubicación:`);
+          console.error(`   - Intento 1: ${fullPath}`);
+          console.error(`   - Intento 2: ${fallbackPath}`);
+          console.error(`   - Nombre de archivo buscado: ${path.basename(firmaPath)}`);
           return '';
         }
       }
       
-      console.log(`✅ Leyendo firma desde: ${fullPath}`);
+      console.log(`✅ [obtenerFirmaBase64] Leyendo firma desde: ${fullPath}`);
       const firmaBuffer = fs.readFileSync(fullPath);
       const base64 = firmaBuffer.toString('base64');
       const ext = path.extname(firmaPath).toLowerCase();
@@ -147,9 +174,14 @@ export class FirmaService {
       else if (ext === '.gif') mimeType = 'image/gif';
       else if (ext === '.webp') mimeType = 'image/webp';
       
+      console.log(`✅ [obtenerFirmaBase64] Firma convertida a base64 exitosamente (${Math.round(base64.length / 1024)}KB, tipo: ${mimeType})`);
       return `data:${mimeType};base64,${base64}`;
     } catch (error) {
-      console.error('❌ Error obteniendo firma base64:', error);
+      console.error('❌ [obtenerFirmaBase64] Error obteniendo firma base64:', error);
+      if (error instanceof Error) {
+        console.error(`   Mensaje: ${error.message}`);
+        console.error(`   Stack: ${error.stack}`);
+      }
       return '';
     }
   }
