@@ -51,9 +51,30 @@ export const authLimiter = rateLimit({
 
 // Rate limiting para informes médicos
 export const informeLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 3,
-  message: 'Demasiados informes médicos'
+  windowMs: 5 * 60 * 1000, // 5 minutos (aumentado de 1 minuto)
+  max: 10, // Aumentado de 3 a 10 para permitir múltiples intentos legítimos
+  message: 'Demasiados informes médicos creados. Por favor, espera unos minutos antes de intentar nuevamente.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'Demasiados informes médicos creados. Por favor, espera unos minutos antes de intentar nuevamente.',
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        retryAfter: Math.ceil(5 * 60) // segundos (5 minutos)
+      }
+    });
+  },
+  // Usar identificador de usuario si está disponible, de lo contrario usar IP
+  keyGenerator: (req) => {
+    // Si el usuario está autenticado, usar su ID para evitar bloqueos compartidos por IP
+    if (req.user?.id || req.user?.usuario_id) {
+      return `informe:${req.user.id || req.user.usuario_id}`;
+    }
+    // Fallback a IP si no hay usuario autenticado
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  }
 });
 
 // Rate limiting para emails
