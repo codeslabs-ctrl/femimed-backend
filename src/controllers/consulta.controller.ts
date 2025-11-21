@@ -475,22 +475,31 @@ export class ConsultaController {
         }
       }
 
-      // Validar que la fecha sea futura (manejo de zona horaria)
-      const fechaConsulta = new Date(consultaData.fecha_pautada + 'T00:00:00.000Z'); // Forzar UTC
+      // Validar que la fecha sea hoy o futura (manejo de zona horaria)
+      // La fecha viene en formato YYYY-MM-DD, necesitamos comparar solo la fecha sin hora
+      const fechaConsultaStr = consultaData.fecha_pautada; // Formato: YYYY-MM-DD
       const fechaActual = new Date();
-      fechaActual.setUTCHours(0, 0, 0, 0); // Usar UTC para evitar problemas de zona horaria
+      
+      // Crear fechas solo con año, mes y día (sin hora) para comparación justa
+      const fechaConsulta = new Date(fechaConsultaStr + 'T00:00:00');
+      fechaConsulta.setHours(0, 0, 0, 0);
+      
+      const fechaHoy = new Date();
+      fechaHoy.setHours(0, 0, 0, 0);
       
       console.log('🔍 Validación de fecha:', {
-        fechaRecibida: consultaData.fecha_pautada,
+        fechaRecibida: fechaConsultaStr,
         fechaConsulta: fechaConsulta.toISOString(),
-        fechaActual: fechaActual.toISOString(),
-        esFutura: fechaConsulta >= fechaActual
+        fechaHoy: fechaHoy.toISOString(),
+        esHoyOFutura: fechaConsulta >= fechaHoy,
+        diferenciaDias: Math.floor((fechaConsulta.getTime() - fechaHoy.getTime()) / (1000 * 60 * 60 * 24))
       });
       
-      if (fechaConsulta < fechaActual) {
+      // Permitir fecha de hoy o futura (>= en lugar de >)
+      if (fechaConsulta < fechaHoy) {
         res.status(400).json({
           success: false,
-          error: { message: 'La fecha de la consulta debe ser futura (posterior a hoy)' }
+          error: { message: 'La fecha de la consulta debe ser hoy o una fecha futura. No se pueden programar consultas en fechas pasadas.' }
         } as ApiResponse<null>);
         return;
       }
