@@ -37,7 +37,26 @@ export class FirmaService {
       console.log(`📁 Ubicación: ${rutaCompleta}`);
       console.log(`🔐 Hash de integridad: ${hashValue}`);
       
-      // Nota: La ruta retornada es relativa y será copiada a dist/assets/firmas/ durante el build
+      // Copiar también a dist/assets/firmas/ para que esté disponible inmediatamente
+      const distPath = path.join(process.cwd(), 'dist', 'assets', 'firmas', filename);
+      const distDir = path.dirname(distPath);
+      
+      try {
+        // Crear directorio dist/assets/firmas/ si no existe
+        if (!fs.existsSync(distDir)) {
+          fs.mkdirSync(distDir, { recursive: true });
+          console.log(`📁 Directorio creado: ${distDir}`);
+        }
+        
+        // Copiar archivo a dist/
+        fs.copyFileSync(rutaCompleta, distPath);
+        console.log(`✅ Firma copiada a dist/: ${distPath}`);
+      } catch (error) {
+        // Si falla la copia a dist/, no es crítico (se copiará en el próximo build)
+        console.warn(`⚠️ No se pudo copiar firma a dist/ (se copiará en el próximo build):`, error);
+      }
+      
+      // Nota: La ruta retornada es relativa y está disponible en assets/ y dist/assets/
       return `/assets/firmas/${filename}`;
     } catch (error) {
       console.error('❌ Error guardando firma:', error);

@@ -56,30 +56,61 @@ export class FirmaController {
         return;
       }
       
+      console.log(`📤 [subirFirma] Iniciando subida de firma para médico ID: ${medicoId}`);
+      
       // Eliminar firma anterior si existe
+      console.log(`🗑️ [subirFirma] Eliminando firma anterior si existe...`);
       await this.firmaService.eliminarFirma(medicoId);
       
       // Guardar nueva firma
+      console.log(`💾 [subirFirma] Guardando archivo de firma...`);
       const rutaFirma = await this.firmaService.guardarFirma(medicoId, req.file);
+      console.log(`✅ [subirFirma] Archivo guardado en: ${rutaFirma}`);
       
       // Actualizar en base de datos
-      const { error: updateError } = await supabase
+      console.log(`💾 [subirFirma] Actualizando firma_digital en BD para médico ID: ${medicoId}`);
+      console.log(`📝 [subirFirma] Ruta a guardar: ${rutaFirma}`);
+      
+      const { data: updatedMedico, error: updateError } = await supabase
         .from('medicos')
         .update({ firma_digital: rutaFirma })
-        .eq('id', medicoId);
+        .eq('id', medicoId)
+        .select('id, nombres, apellidos, firma_digital')
+        .single();
       
       if (updateError) {
+        console.error(`❌ [subirFirma] Error actualizando BD:`, updateError);
         throw new Error(`Error actualizando firma en base de datos: ${updateError.message}`);
+      }
+      
+      if (!updatedMedico) {
+        console.error(`❌ [subirFirma] No se encontró médico después de actualizar`);
+        throw new Error('No se pudo verificar la actualización en base de datos');
+      }
+      
+      console.log(`✅ [subirFirma] BD actualizada exitosamente`);
+      console.log(`✅ [subirFirma] Médico actualizado:`, {
+        id: updatedMedico.id,
+        nombres: updatedMedico.nombres,
+        apellidos: updatedMedico.apellidos,
+        firma_digital: updatedMedico.firma_digital
+      });
+      
+      // Verificar que la ruta guardada coincide
+      if (updatedMedico.firma_digital !== rutaFirma) {
+        console.warn(`⚠️ [subirFirma] ADVERTENCIA: La ruta en BD (${updatedMedico.firma_digital}) no coincide con la esperada (${rutaFirma})`);
+      } else {
+        console.log(`✅ [subirFirma] Verificación exitosa: La ruta en BD coincide con la esperada`);
       }
       
       res.json({
         success: true,
         data: { 
-          firma_digital: rutaFirma,
+          firma_digital: updatedMedico.firma_digital,
           medico: {
-            id: medico.id,
-            nombres: medico.nombres,
-            apellidos: medico.apellidos
+            id: updatedMedico.id,
+            nombres: updatedMedico.nombres,
+            apellidos: updatedMedico.apellidos
           }
         },
         message: 'Firma digital subida exitosamente'
