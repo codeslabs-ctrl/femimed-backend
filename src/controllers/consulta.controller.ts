@@ -460,6 +460,17 @@ export class ConsultaController {
   // Crear nueva consulta
   static async createConsulta(req: Request, res: Response): Promise<void> {
     try {
+      console.log('📥 [BACKEND] createConsulta - Datos recibidos:', {
+        paciente_id: req.body.paciente_id,
+        medico_id: req.body.medico_id,
+        fecha_pautada: req.body.fecha_pautada,
+        hora_pautada: req.body.hora_pautada,
+        motivo_consulta: req.body.motivo_consulta,
+        tipo_consulta: req.body.tipo_consulta,
+        prioridad: req.body.prioridad,
+        datosCompletos: req.body
+      });
+      
       const consultaData = req.body;
       const clinicaAlias = process.env['CLINICA_ALIAS'];
 
@@ -479,30 +490,70 @@ export class ConsultaController {
       // La fecha viene en formato YYYY-MM-DD
       const fechaConsultaStr = consultaData.fecha_pautada; // Formato: YYYY-MM-DD
       
+      console.log('📅 [BACKEND] Validación de fecha - Inicio:', {
+        fechaConsultaStr,
+        tipo: typeof fechaConsultaStr,
+        valorOriginal: consultaData.fecha_pautada
+      });
+      
       // Obtener fecha actual en zona horaria de Venezuela
       const now = new Date();
       const fechaHoyVenezuela = now.toLocaleDateString('en-CA', { 
         timeZone: 'America/Caracas' 
       }); // Formato YYYY-MM-DD
       
-      // Comparar fechas en formato YYYY-MM-DD (solo fecha, sin hora)
-      console.log('🔍 Validación de fecha (Venezuela):', {
-        fechaRecibida: fechaConsultaStr,
-        fechaHoyVenezuela: fechaHoyVenezuela,
+      console.log('📅 [BACKEND] Fechas obtenidas:', {
+        fechaConsultaStr,
+        fechaHoyVenezuela,
         fechaActualUTC: now.toISOString(),
         fechaActualVenezuela: now.toLocaleString('es-VE', { timeZone: 'America/Caracas' }),
-        esHoyOFutura: fechaConsultaStr >= fechaHoyVenezuela
+        timestampUTC: now.getTime(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezoneObjetivo: 'America/Caracas'
+      });
+      
+      // Comparar fechas en formato YYYY-MM-DD (solo fecha, sin hora)
+      const esValida = fechaConsultaStr >= fechaHoyVenezuela;
+      const comparacion = fechaConsultaStr < fechaHoyVenezuela ? 'MENOR (INVÁLIDA)' : 'MAYOR O IGUAL (VÁLIDA)';
+      
+      console.log('📅 [BACKEND] Comparación de fechas:', {
+        fechaConsulta: fechaConsultaStr,
+        fechaHoy: fechaHoyVenezuela,
+        comparacion,
+        esValida,
+        resultadoComparacion: fechaConsultaStr < fechaHoyVenezuela ? 'RECHAZAR' : 'ACEPTAR'
       });
       
       // Permitir fecha de hoy o futura (comparación de strings YYYY-MM-DD funciona correctamente)
       if (fechaConsultaStr < fechaHoyVenezuela) {
+        console.error('❌ [BACKEND] Fecha rechazada - Es pasada:', {
+          fechaConsulta: fechaConsultaStr,
+          fechaHoy: fechaHoyVenezuela,
+          diferencia: fechaConsultaStr < fechaHoyVenezuela,
+          mensajeError: 'La fecha de la consulta debe ser hoy o una fecha futura. No se pueden programar consultas en fechas pasadas.'
+        });
+        
         res.status(400).json({
           success: false,
           error: { message: 'La fecha de la consulta debe ser hoy o una fecha futura. No se pueden programar consultas en fechas pasadas.' }
         } as ApiResponse<null>);
         return;
       }
+      
+      console.log('✅ [BACKEND] Fecha validada correctamente, procediendo a crear consulta...');
 
+      console.log('💾 [BACKEND] Insertando consulta en base de datos:', {
+        paciente_id: consultaData.paciente_id,
+        medico_id: consultaData.medico_id,
+        fecha_pautada: consultaData.fecha_pautada,
+        hora_pautada: consultaData.hora_pautada,
+        estado_consulta: consultaData.estado_consulta || 'agendada',
+        duracion_estimada: consultaData.duracion_estimada || 30,
+        prioridad: consultaData.prioridad || 'normal',
+        tipo_consulta: consultaData.tipo_consulta || 'primera_vez',
+        clinica_alias: clinicaAlias
+      });
+      
       const { data: consulta, error } = await supabase
         .from('consultas_pacientes')
         .insert([{
@@ -516,6 +567,22 @@ export class ConsultaController {
         }])
         .select()
         .single();
+      
+      if (error) {
+        console.error('❌ [BACKEND] Error al insertar consulta:', {
+          error: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+      } else {
+        console.log('✅ [BACKEND] Consulta creada exitosamente:', {
+          id: consulta?.id,
+          fecha_pautada: consulta?.fecha_pautada,
+          hora_pautada: consulta?.hora_pautada,
+          estado_consulta: consulta?.estado_consulta
+        });
+      }
 
       if (error) {
         console.error('Error creating consulta:', error);
