@@ -140,8 +140,28 @@ export class FinanzasController {
         }));
 
         // Determinar la moneda principal de los servicios filtrados
-        const monedas = serviciosFiltrados.map(s => s.moneda_pago);
-        const monedaPrincipal = monedas.length > 0 ? monedas[0] : 'COP';
+        // Priorizar VES sobre otras monedas, y convertir COP a VES
+        const monedas = serviciosFiltrados.map(s => {
+          // Convertir COP a VES (legacy)
+          const moneda = s.moneda_pago;
+          return moneda === 'COP' ? 'VES' : moneda;
+        });
+        let monedaPrincipal = 'VES'; // Valor por defecto
+        
+        if (monedas.length > 0) {
+          // Si hay VES, usar VES como moneda principal
+          if (monedas.includes('VES')) {
+            monedaPrincipal = 'VES';
+          } 
+          // Si hay USD, usar USD
+          else if (monedas.includes('USD')) {
+            monedaPrincipal = 'USD';
+          } 
+          // Si no hay VES ni USD, usar VES por defecto (en lugar de la primera moneda)
+          else {
+            monedaPrincipal = 'VES';
+          }
+        }
 
         return {
           id: consulta.id,
