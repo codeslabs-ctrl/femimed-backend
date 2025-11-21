@@ -475,28 +475,27 @@ export class ConsultaController {
         }
       }
 
-      // Validar que la fecha sea hoy o futura (manejo de zona horaria)
-      // La fecha viene en formato YYYY-MM-DD, necesitamos comparar solo la fecha sin hora
+      // Validar que la fecha sea hoy o futura usando zona horaria de Venezuela (America/Caracas)
+      // La fecha viene en formato YYYY-MM-DD
       const fechaConsultaStr = consultaData.fecha_pautada; // Formato: YYYY-MM-DD
-      const fechaActual = new Date();
       
-      // Crear fechas solo con año, mes y día (sin hora) para comparación justa
-      const fechaConsulta = new Date(fechaConsultaStr + 'T00:00:00');
-      fechaConsulta.setHours(0, 0, 0, 0);
+      // Obtener fecha actual en zona horaria de Venezuela
+      const now = new Date();
+      const fechaHoyVenezuela = now.toLocaleDateString('en-CA', { 
+        timeZone: 'America/Caracas' 
+      }); // Formato YYYY-MM-DD
       
-      const fechaHoy = new Date();
-      fechaHoy.setHours(0, 0, 0, 0);
-      
-      console.log('🔍 Validación de fecha:', {
+      // Comparar fechas en formato YYYY-MM-DD (solo fecha, sin hora)
+      console.log('🔍 Validación de fecha (Venezuela):', {
         fechaRecibida: fechaConsultaStr,
-        fechaConsulta: fechaConsulta.toISOString(),
-        fechaHoy: fechaHoy.toISOString(),
-        esHoyOFutura: fechaConsulta >= fechaHoy,
-        diferenciaDias: Math.floor((fechaConsulta.getTime() - fechaHoy.getTime()) / (1000 * 60 * 60 * 24))
+        fechaHoyVenezuela: fechaHoyVenezuela,
+        fechaActualUTC: now.toISOString(),
+        fechaActualVenezuela: now.toLocaleString('es-VE', { timeZone: 'America/Caracas' }),
+        esHoyOFutura: fechaConsultaStr >= fechaHoyVenezuela
       });
       
-      // Permitir fecha de hoy o futura (>= en lugar de >)
-      if (fechaConsulta < fechaHoy) {
+      // Permitir fecha de hoy o futura (comparación de strings YYYY-MM-DD funciona correctamente)
+      if (fechaConsultaStr < fechaHoyVenezuela) {
         res.status(400).json({
           success: false,
           error: { message: 'La fecha de la consulta debe ser hoy o una fecha futura. No se pueden programar consultas en fechas pasadas.' }
