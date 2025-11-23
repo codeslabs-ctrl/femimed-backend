@@ -39,10 +39,34 @@ export const generalLimiter = rateLimit({
   },
   // Saltar rate limiting para rutas específicas que no deberían tener límites estrictos
   skip: (req) => {
-    // Permitir todas las solicitudes a rutas de médicos por especialidad (muy usadas en el frontend)
-    if (req.url?.includes('/medicos/by-especialidad/')) {
+    // Verificar si la request tiene la marca para saltar rate limiting
+    if ((req as any).skipRateLimit) {
       return true;
     }
+    
+    // Permitir todas las solicitudes a rutas de médicos por especialidad (muy usadas en el frontend)
+    // El rate limiter se aplica ANTES de las rutas, así que necesitamos verificar la URL completa
+    const url = req.url || '';
+    const path = req.path || '';
+    const originalUrl = req.originalUrl || '';
+    const baseUrl = req.baseUrl || '';
+    
+    // Construir todas las posibles variaciones de la ruta
+    const allPaths = [url, path, originalUrl, baseUrl, `${baseUrl}${path}`, `${baseUrl}${url}`].filter(Boolean);
+    
+    // Verificar si alguna de las rutas contiene /medicos/by-especialidad/ o by-especialidad
+    const shouldSkip = allPaths.some(p => 
+      p.includes('/medicos/by-especialidad/') || 
+      p.includes('/medicos/by-especialidad') ||
+      p.includes('by-especialidad/') ||
+      p.includes('by-especialidad')
+    );
+    
+    if (shouldSkip) {
+      console.log('✅ Rate limiter SKIP para ruta:', { url, path, originalUrl, baseUrl });
+      return true;
+    }
+    
     return false;
   }
 });

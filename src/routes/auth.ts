@@ -4,8 +4,7 @@ import { validateRequest } from '../middleware/validation.js';
 // import { authenticateToken } from '../middleware/auth.js';
 import { 
   authSecurityMiddleware,
-  validateLogin,
-  authLimiter
+  validateLogin
 } from '../middleware/security.js';
 import { 
   SignUpRequest, 
@@ -62,14 +61,14 @@ const authSchemas = {
 };
 
 // Auth routes con middlewares de seguridad
-router.post('/signup', authLimiter, validateRequest(authSchemas.signUp), (req, res) => authController.signUp(req, res));
-router.post('/signin', authLimiter, validateLogin, (req, res) => authController.signIn(req, res));
-router.post('/login', authLimiter, validateLogin, (req, res) => authController.login(req, res));
+router.post('/signup', validateRequest(authSchemas.signUp), (req, res) => authController.signUp(req, res));
+router.post('/signin', validateLogin, (req, res) => authController.signIn(req, res));
+router.post('/login', validateLogin, (req, res) => authController.login(req, res));
 router.post('/signout', (req, res) => authController.signOut(req, res));
 router.get('/user', authSecurityMiddleware, (req: any, res: any) => authController.getCurrentUser(req, res));
 router.put('/user', authSecurityMiddleware, validateRequest(authSchemas.updateUser), (req: any, res: any) => authController.updateUser(req, res));
-router.post('/reset-password', authLimiter, validateRequest(authSchemas.resetPassword), (req, res) => authController.resetPassword(req, res));
-router.post('/regenerate-otp', authLimiter, validateRequest(authSchemas.regenerateOTP), (req, res) => authController.regenerateOTP(req, res));
+router.post('/reset-password', validateRequest(authSchemas.resetPassword), (req, res) => authController.resetPassword(req, res));
+router.post('/regenerate-otp', validateRequest(authSchemas.regenerateOTP), (req, res) => authController.regenerateOTP(req, res));
 router.post('/change-password', authSecurityMiddleware, validateRequest(authSchemas.changePassword), (req: any, res: any) => authController.changePassword(req, res));
 
 // Debug endpoint to check current user role

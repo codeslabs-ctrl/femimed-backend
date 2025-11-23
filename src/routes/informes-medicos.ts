@@ -13,9 +13,7 @@ import {
   medicoSecretariaMiddleware,
   adminSecurityMiddleware,
   validateInforme,
-  validateInformeUpdate,
-  informeLimiter,
-  emailLimiter
+  validateInformeUpdate
 } from '../middleware/security';
 import informeMedicoController from '../controllers/informe-medico.controller';
 
@@ -30,7 +28,7 @@ router.use(verifyClinica);
 // =====================================================
 
 // Crear nuevo informe médico (solo médicos y admins)
-router.post('/', medicoSecretariaMiddleware, validateInforme, informeLimiter, informeMedicoController.crearInforme);
+router.post('/', medicoSecretariaMiddleware, validateInforme, informeMedicoController.crearInforme);
 
 // Obtener lista de informes médicos (médicos y admins)
 router.get('/', medicoSecretariaMiddleware, informeMedicoController.obtenerInformes);
@@ -83,8 +81,8 @@ router.delete('/anexos/:anexoId', medicoSecretariaMiddleware, informeMedicoContr
 // Obtener envíos de un informe (médicos y admins)
 router.get('/:informeId/envios', medicoSecretariaMiddleware, informeMedicoController.obtenerEnviosPorInforme);
 
-// Enviar informe a paciente (médicos y admins, con rate limiting para emails)
-router.post('/:informeId/enviar', medicoSecretariaMiddleware, emailLimiter, informeMedicoController.enviarInforme);
+// Enviar informe a paciente (médicos y admins)
+router.post('/:informeId/enviar', medicoSecretariaMiddleware, informeMedicoController.enviarInforme);
 
 // =====================================================
 // FIRMA DIGITAL

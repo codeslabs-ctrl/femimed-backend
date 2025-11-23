@@ -6,8 +6,7 @@ import { testConnection } from './config/database.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { 
   securityHeaders, 
-  corsMiddleware, 
-  generalLimiter
+  corsMiddleware
 } from './middleware/security.js';
 // import { ApiResponse } from './types/index.js';
 
@@ -20,7 +19,7 @@ const app = express();
 // Aplicar middlewares de seguridad
 app.use(securityHeaders);
 app.use(corsMiddleware);
-app.use(generalLimiter);
+// Rate limiter removido - causaba más problemas que beneficios
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
