@@ -23,11 +23,28 @@ export const corsMiddleware = cors({
   credentials: true
 });
 
-// Rate limiting general
+// Rate limiting general - Configurado para ser muy permisivo y evitar bloqueos de usuarios
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100,
-  message: 'Demasiadas solicitudes desde esta IP'
+  max: 10000, // Límite muy alto para evitar bloqueos (10000 solicitudes por 15 minutos)
+  message: 'Demasiadas solicitudes',
+  // Usar identificador de usuario si está disponible, de lo contrario usar IP
+  keyGenerator: (req) => {
+    // Si el usuario está autenticado, usar su ID para evitar bloqueos compartidos por IP
+    if (req.user?.id || req.user?.usuario_id) {
+      return `general:${req.user.id || req.user.usuario_id}`;
+    }
+    // Fallback a IP si no hay usuario autenticado
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  },
+  // Saltar rate limiting para rutas específicas que no deberían tener límites estrictos
+  skip: (req) => {
+    // Permitir todas las solicitudes a rutas de médicos por especialidad (muy usadas en el frontend)
+    if (req.url?.includes('/medicos/by-especialidad/')) {
+      return true;
+    }
+    return false;
+  }
 });
 
 // Rate limiting para autenticación
