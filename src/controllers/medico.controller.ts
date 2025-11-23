@@ -799,7 +799,7 @@ export class MedicoController {
         .eq('id', id);
 
       let nombreEspecialidad = 'Especialidad no encontrada';
-      if (!especialidadesError && especialidades && especialidades.length > 0) {
+      if (!especialidadesError && especialidades && especialidades.length > 0 && especialidades[0]) {
         nombreEspecialidad = especialidades[0].nombre_especialidad || 'Especialidad no encontrada';
       } else if (especialidadesError) {
         console.warn('⚠️ No se pudo obtener la especialidad:', especialidadesError.message);
