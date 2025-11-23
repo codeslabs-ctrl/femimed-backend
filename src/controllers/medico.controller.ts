@@ -768,6 +768,8 @@ export class MedicoController {
       const { especialidadId } = req.params;
       const id = parseInt(especialidadId);
 
+      console.log('🔍 getMedicosByEspecialidad - especialidadId recibido:', especialidadId, 'parseado:', id);
+
       if (isNaN(id) || id <= 0) {
         const response: ApiResponse = {
           success: false,
@@ -777,36 +779,51 @@ export class MedicoController {
         return;
       }
 
-      const { data, error } = await supabase
+      // Obtener médicos por especialidad
+      const { data: medicos, error: medicosError } = await supabase
         .from('medicos')
-        .select(`
-          *,
-          especialidades!medicos_especialidad_id_fkey (
-            nombre
-          )
-        `)
+        .select('*')
         .eq('especialidad_id', id)
         .eq('activo', true)
         .order('nombres', { ascending: true });
 
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
+      if (medicosError) {
+        console.error('❌ Error obteniendo médicos:', medicosError);
+        throw new Error(`Database error: ${medicosError.message}`);
       }
 
-      const medicos = data?.map(medico => ({
+      // Obtener todas las especialidades para mapear nombres (más robusto que .single())
+      const { data: especialidades, error: especialidadesError } = await supabase
+        .from('especialidades')
+        .select('id, nombre_especialidad')
+        .eq('id', id);
+
+      let nombreEspecialidad = 'Especialidad no encontrada';
+      if (!especialidadesError && especialidades && especialidades.length > 0) {
+        nombreEspecialidad = especialidades[0].nombre_especialidad || 'Especialidad no encontrada';
+      } else if (especialidadesError) {
+        console.warn('⚠️ No se pudo obtener la especialidad:', especialidadesError.message);
+      }
+
+      // Combinar médicos con nombres de especialidades
+      const medicosWithEspecialidad = medicos?.map(medico => ({
         ...medico,
-        especialidad_nombre: (medico.especialidades as any)?.nombre_especialidad
+        especialidad_nombre: nombreEspecialidad
       })) || [];
 
+      console.log('✅ Médicos encontrados:', medicosWithEspecialidad.length);
+      
       const response: ApiResponse = {
         success: true,
-        data: medicos
+        data: medicosWithEspecialidad
       };
       res.json(response);
     } catch (error) {
+      console.error('❌ Error en getMedicosByEspecialidad:', error);
+      console.error('❌ Stack trace:', (error as Error).stack);
       const response: ApiResponse = {
         success: false,
-        error: { message: (error as Error).message }
+        error: { message: (error as Error).message || 'Error interno del servidor' }
       };
       res.status(500).json(response);
     }
