@@ -227,10 +227,23 @@ export class FinalizarConsultaController {
       
       // 7. Actualizar estado de la consulta
       console.log('🔍 Actualizando estado de consulta a "finalizada"...');
+      console.log('🔍 Consulta completa:', JSON.stringify(consulta, null, 2));
+      
+      // La fecha de culminación debe ser >= fecha_pautada
+      const fechaConsultaStr = consulta.fecha_pautada;
+      const ahora = new Date();
+      
+      console.log('🔍 Fecha consulta encontrada:', fechaConsultaStr);
+      
+      // Crear fecha de culminación usando la fecha de la consulta con hora actual
+      const fechaCulminacion = new Date(fechaConsultaStr + 'T' + ahora.toTimeString().split(' ')[0]);
+      
+      console.log('🔍 Fecha culminación:', fechaCulminacion.toISOString());
+      
       const updateData: any = {
         estado_consulta: 'finalizada',
-        fecha_culminacion: new Date().toISOString(),
-        fecha_pago: new Date().toISOString().split('T')[0],
+        fecha_culminacion: fechaCulminacion.toISOString(),
+        fecha_pago: fechaConsultaStr,
         metodo_pago: 'Efectivo'
       };
       
