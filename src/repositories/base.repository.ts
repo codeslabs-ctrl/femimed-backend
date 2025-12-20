@@ -1,6 +1,5 @@
-import { SupabaseClient } from '@supabase/supabase-js';
-import { supabase } from '../config/database.js';
 import { PaginationInfo } from '../types/index.js';
+import { PostgresRepository } from './postgres.repository.js';
 
 export interface BaseRepository<T = any> {
   findAll(filters?: Record<string, any>, pagination?: { page: number; limit: number }): Promise<{ data: T[]; pagination: PaginationInfo }>;
@@ -11,152 +10,46 @@ export interface BaseRepository<T = any> {
   search(query: string, fields: string[]): Promise<T[]>;
 }
 
+// Factory method para crear el repositorio apropiado
+// Ahora siempre usa PostgreSQL
+export function createRepository<T>(tableName: string, idColumn: string = 'id'): BaseRepository<T> {
+  return new PostgresRepository<T>(tableName, idColumn);
+}
+
+// Clase obsoleta - mantenida solo para compatibilidad
+// Ya no se usa Supabase
 export class SupabaseRepository<T = any> implements BaseRepository<T> {
-  protected client: SupabaseClient;
   protected tableName: string;
 
   constructor(tableName: string) {
-    this.client = supabase;
     this.tableName = tableName;
+    console.warn('⚠️ SupabaseRepository está obsoleto. Use PostgresRepository en su lugar.');
   }
 
   async findAll(
-    filters: Record<string, any> = {},
-    pagination: { page: number; limit: number } = { page: 1, limit: 10 }
+    _filters: Record<string, any> = {},
+    _pagination: { page: number; limit: number } = { page: 1, limit: 10 }
   ): Promise<{ data: T[]; pagination: PaginationInfo }> {
-    try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
-
-      let query = this.client.from(this.tableName).select('*', { count: 'exact' });
-
-      // Apply filters
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== null && value !== undefined && value !== '') {
-          query = query.eq(key, value);
-        }
-      });
-
-      // Apply pagination
-      query = query.range(offset, offset + limit - 1);
-
-      const { data, error, count } = await query;
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      const paginationInfo: PaginationInfo = {
-        page,
-        limit,
-        total: count || 0,
-        pages: Math.ceil((count || 0) / limit)
-      };
-
-      return {
-        data: data || [],
-        pagination: paginationInfo
-      };
-    } catch (error) {
-      throw new Error(`Failed to fetch records: ${(error as Error).message}`);
-    }
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 
-  async findById(id: string): Promise<T | null> {
-    try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return null;
-        }
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data;
-    } catch (error) {
-      throw new Error(`Failed to fetch record: ${(error as Error).message}`);
-    }
+  async findById(_id: string): Promise<T | null> {
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 
-  async create(data: Partial<T>): Promise<T> {
-    try {
-      const { data: result, error } = await this.client
-        .from(this.tableName)
-        .insert([data])
-        .select()
-        .single();
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return result;
-    } catch (error) {
-      throw new Error(`Failed to create record: ${(error as Error).message}`);
-    }
+  async create(_data: Partial<T>): Promise<T> {
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 
-  async update(id: string, data: Partial<T>): Promise<T> {
-    try {
-      const { data: result, error } = await this.client
-        .from(this.tableName)
-        .update(data)
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          throw new Error('Record not found');
-        }
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return result;
-    } catch (error) {
-      throw new Error(`Failed to update record: ${(error as Error).message}`);
-    }
+  async update(_id: string, _data: Partial<T>): Promise<T> {
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 
-  async delete(id: string): Promise<boolean> {
-    try {
-      const { error } = await this.client
-        .from(this.tableName)
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to delete record: ${(error as Error).message}`);
-    }
+  async delete(_id: string): Promise<boolean> {
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 
-  async search(query: string, fields: string[]): Promise<T[]> {
-    try {
-      const searchConditions = fields.map(field => `${field}.ilike.%${query}%`).join(',');
-      
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .or(searchConditions);
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
-    } catch (error) {
-      throw new Error(`Failed to search records: ${(error as Error).message}`);
-    }
+  async search(_query: string, _fields: string[]): Promise<T[]> {
+    throw new Error('SupabaseRepository is deprecated. Use PostgresRepository instead.');
   }
 }
-

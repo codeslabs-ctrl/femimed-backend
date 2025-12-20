@@ -1,12 +1,13 @@
 import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
-import rateLimit from 'express-rate-limit';
 import { config } from './config/environment.js';
 import { testConnection } from './config/database.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
+import { 
+  securityHeaders, 
+  corsMiddleware
+} from './middleware/security.js';
 // import { ApiResponse } from './types/index.js';
 
 // Import routes
@@ -15,45 +16,19 @@ import healthRoutes from './routes/health.js';
 
 const app = express();
 
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  },
-}));
-
-// CORS configuration
-app.use(cors({
-  origin: config.cors.origin,
-  credentials: config.cors.credentials,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: config.api.rateLimit.windowMs,
-  max: config.api.rateLimit.maxRequests,
-  message: {
-    success: false,
-    error: {
-      message: 'Too many requests from this IP, please try again later.'
-    }
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use(limiter);
+// Aplicar middlewares de seguridad
+app.use(securityHeaders);
+app.use(corsMiddleware);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static('uploads'));
+
+// Serve static files from assets directory
+app.use('/assets', express.static('assets'));
 
 // Compression middleware
 app.use(compression());
@@ -86,7 +61,14 @@ const startServer = async (): Promise<void> => {
     app.listen(config.port, () => {
       console.log(`🚀 Server running on port ${config.port}`);
       console.log(`📊 Environment: ${config.nodeEnv}`);
-      console.log(`🔗 API Base URL: http://localhost:${config.port}/api/${config.api.version}`);
+      
+      // Mostrar URL apropiada según el entorno
+      if (config.nodeEnv === 'production') {
+        const productionUrl = process.env['API_URL'] || `https://api.demomed.codes-labs.com:${config.port}`;
+        console.log(`🔗 API Base URL: ${productionUrl}/api/${config.api.version}`);
+      } else {
+        console.log(`🔗 API Base URL: http://localhost:${config.port}/api/${config.api.version}`);
+      }
     });
   } catch (error) {
     console.error('❌ Failed to start server:', (error as Error).message);

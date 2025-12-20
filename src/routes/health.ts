@@ -1,20 +1,24 @@
 import express, { Request, Response } from 'express';
-import { supabase } from '../config/database.js';
+import { postgresPool } from '../config/database.js';
 import { ApiResponse } from '../types/index.js';
 
 const router = express.Router();
 
-// Health check with Supabase connection test
+// Health check with database connection test
 router.get('/', async (_req: Request, res: Response<ApiResponse>) => {
   try {
-    // Test Supabase connection
-    const { error } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_schema', 'public')
-      .limit(1);
-
-    const supabaseStatus = error ? 'disconnected' : 'connected';
+    let dbStatus = 'unknown';
+    let dbType = 'PostgreSQL';
+    
+    // Test PostgreSQL connection
+    try {
+      const client = await postgresPool.connect();
+      await client.query('SELECT NOW()');
+      client.release();
+      dbStatus = 'connected';
+    } catch (pgError) {
+      dbStatus = 'disconnected';
+    }
     
     const response: ApiResponse = {
       success: true,
@@ -24,7 +28,10 @@ router.get('/', async (_req: Request, res: Response<ApiResponse>) => {
         environment: process.env['NODE_ENV'] || 'development',
         services: {
           server: 'running',
-          supabase: supabaseStatus
+          database: {
+            type: dbType,
+            status: dbStatus
+          }
         },
         version: '1.0.0'
       }
@@ -46,16 +53,34 @@ router.get('/', async (_req: Request, res: Response<ApiResponse>) => {
 // Detailed health check
 router.get('/detailed', async (_req: Request, res: Response<ApiResponse>) => {
   try {
-    // Test Supabase connection and get table info
-    const { data: tables, error: tablesError } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_schema', 'public');
-
-    await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .limit(1);
+    let dbInfo: any = {};
+    
+    // Test PostgreSQL connection and get database info
+    try {
+      const client = await postgresPool.connect();
+      const versionResult = await client.query('SELECT version() as pg_version');
+      const tableCountResult = await client.query(`
+        SELECT COUNT(*) as table_count 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public'
+      `);
+      client.release();
+      
+      dbInfo = {
+        type: 'PostgreSQL',
+        status: 'connected',
+        version: versionResult.rows[0]?.pg_version || 'unknown',
+        tables: parseInt(tableCountResult.rows[0]?.table_count || '0'),
+        host: process.env['POSTGRES_HOST'],
+        database: process.env['POSTGRES_DB']
+      };
+    } catch (pgError) {
+      dbInfo = {
+        type: 'PostgreSQL',
+        status: 'error',
+        error: (pgError as Error).message
+      };
+    }
 
     const response: ApiResponse = {
       success: true,
@@ -70,12 +95,7 @@ router.get('/detailed', async (_req: Request, res: Response<ApiResponse>) => {
             memory: process.memoryUsage(),
             version: process.version
           },
-          supabase: {
-            status: tablesError ? 'error' : 'connected',
-            url: process.env['SUPABASE_URL'],
-            tables: tables?.length || 0,
-            error: tablesError?.message
-          }
+          database: dbInfo
         },
         version: '1.0.0'
       }

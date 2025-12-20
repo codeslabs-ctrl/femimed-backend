@@ -1,4 +1,4 @@
-import { SupabaseRepository } from './base.repository.js';
+import { PostgresRepository } from './postgres.repository.js';
 
 export interface AppointmentData {
   id?: string;
@@ -14,24 +14,18 @@ export interface AppointmentData {
   updated_at?: string;
 }
 
-export class AppointmentRepository extends SupabaseRepository<AppointmentData> {
+export class AppointmentRepository extends PostgresRepository<AppointmentData> {
   constructor() {
     super('appointments');
   }
 
   async findByPatientId(patientId: string): Promise<AppointmentData[]> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('patient_id', patientId)
-        .order('appointment_date', { ascending: true });
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE patient_id = $1 ORDER BY appointment_date ASC`,
+        [patientId]
+      );
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to find appointments by patient ID: ${(error as Error).message}`);
     }
@@ -39,17 +33,11 @@ export class AppointmentRepository extends SupabaseRepository<AppointmentData> {
 
   async findByDoctorId(doctorId: string): Promise<AppointmentData[]> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('doctor_id', doctorId)
-        .order('appointment_date', { ascending: true });
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE doctor_id = $1 ORDER BY appointment_date ASC`,
+        [doctorId]
+      );
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to find appointments by doctor ID: ${(error as Error).message}`);
     }
@@ -57,18 +45,11 @@ export class AppointmentRepository extends SupabaseRepository<AppointmentData> {
 
   async findByDateRange(startDate: string, endDate: string): Promise<AppointmentData[]> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .gte('appointment_date', startDate)
-        .lte('appointment_date', endDate)
-        .order('appointment_date', { ascending: true });
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE appointment_date >= $1 AND appointment_date <= $2 ORDER BY appointment_date ASC`,
+        [startDate, endDate]
+      );
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to find appointments by date range: ${(error as Error).message}`);
     }
@@ -76,17 +57,11 @@ export class AppointmentRepository extends SupabaseRepository<AppointmentData> {
 
   async findByStatus(status: string): Promise<AppointmentData[]> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('status', status)
-        .order('appointment_date', { ascending: true });
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE status = $1 ORDER BY appointment_date ASC`,
+        [status]
+      );
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to find appointments by status: ${(error as Error).message}`);
     }
@@ -96,24 +71,18 @@ export class AppointmentRepository extends SupabaseRepository<AppointmentData> {
     try {
       const today = new Date().toISOString().split('T')[0];
       
-      let query = this.client
-        .from(this.tableName)
-        .select('*')
-        .gte('appointment_date', today)
-        .eq('status', 'scheduled')
-        .order('appointment_date', { ascending: true });
-
+      let query = `SELECT * FROM ${this.tableName} WHERE appointment_date >= $1 AND status = $2`;
+      const params: any[] = [today, 'scheduled'];
+      
       if (doctorId) {
-        query = query.eq('doctor_id', doctorId);
+        query += ` AND doctor_id = $3`;
+        params.push(doctorId);
       }
-
-      const { data, error } = await query;
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      
+      query += ` ORDER BY appointment_date ASC`;
+      
+      const result = await this.query(query, params);
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to get upcoming appointments: ${(error as Error).message}`);
     }

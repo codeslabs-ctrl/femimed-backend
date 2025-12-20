@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { supabase } from '../config/database.js';
+import { postgresPool } from '../config/database.js';
 // import { validateRequest, schemas } from '../middleware/validation.js';
 import { 
   PaginationQuery, 
@@ -18,16 +18,21 @@ const createGenericRoutes = (tableName: string) => {
 
   // Get all records with pagination and filtering
   routes.get('/', async (req: Request<{}, ApiResponse, {}, PaginationQuery & SearchQuery>, res: Response<ApiResponse>) => {
+    const client = await postgresPool.connect();
     try {
       const { page = 1, limit = 10, sort = 'desc', orderBy, q, filters } = req.query;
       const offset = (page - 1) * limit;
 
-      let query = supabase.from(tableName).select('*', { count: 'exact' });
+      // Build WHERE clause
+      const whereConditions: string[] = [];
+      const queryParams: any[] = [];
+      let paramIndex = 1;
 
       // Apply search
       if (q) {
-        // This is a generic search - you might want to customize based on your table structure
-        query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%`);
+        whereConditions.push(`(name ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`);
+        queryParams.push(`%${q}%`);
+        paramIndex++;
       }
 
       // Apply filters
@@ -36,7 +41,9 @@ const createGenericRoutes = (tableName: string) => {
           const filterObj = JSON.parse(filters as unknown as string);
           Object.entries(filterObj).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
-              query = query.eq(key, value);
+              whereConditions.push(`${key} = $${paramIndex}`);
+              queryParams.push(value);
+              paramIndex++;
             }
           });
         } catch (error) {
@@ -49,37 +56,34 @@ const createGenericRoutes = (tableName: string) => {
         }
       }
 
-      // Apply sorting
-      if (orderBy) {
-        query = query.order(orderBy, { ascending: sort === 'asc' });
-      } else {
-        query = query.order('created_at', { ascending: sort === 'asc' });
-      }
+      // Build WHERE clause
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-      // Apply pagination
-      query = query.range(offset, offset + limit - 1);
+      // Build ORDER BY clause
+      const orderByColumn = orderBy || 'created_at';
+      const orderDirection = sort === 'asc' ? 'ASC' : 'DESC';
+      const orderClause = `ORDER BY ${orderByColumn} ${orderDirection}`;
 
-      const { data, error, count } = await query;
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as total FROM ${tableName} ${whereClause}`;
+      const countResult = await client.query(countQuery, queryParams);
+      const total = parseInt(countResult.rows[0].total);
 
-      if (error) {
-        const response: ApiResponse = {
-          success: false,
-          error: { message: error.message }
-        };
-        res.status(400).json(response);
-        return;
-      }
+      // Get paginated data
+      const dataQuery = `SELECT * FROM ${tableName} ${whereClause} ${orderClause} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      queryParams.push(Number(limit), offset);
+      const dataResult = await client.query(dataQuery, queryParams);
 
       const pagination: PaginationInfo = {
         page: Number(page),
         limit: Number(limit),
-        total: count || 0,
-        pages: Math.ceil((count || 0) / Number(limit))
+        total: total,
+        pages: Math.ceil(total / Number(limit))
       };
 
       const response: ApiResponse = {
         success: true,
-        data,
+        data: dataResult.rows,
         pagination
       };
       res.json(response);
@@ -89,40 +93,34 @@ const createGenericRoutes = (tableName: string) => {
         error: { message: 'Internal server error' }
       };
       res.status(500).json(response);
+    } finally {
+      client.release();
     }
   });
 
   // Get single record by ID
   routes.get('/:id', async (req: Request<{ id: string }>, res: Response<ApiResponse>) => {
+    const client = await postgresPool.connect();
     try {
       const { id } = req.params;
 
-      const { data, error } = await supabase
-        .from(tableName)
-        .select('*')
-        .eq('id', id)
-        .single();
+      const result = await client.query(
+        `SELECT * FROM ${tableName} WHERE id = $1`,
+        [id]
+      );
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          const response: ApiResponse = {
-            success: false,
-            error: { message: 'Record not found' }
-          };
-          res.status(404).json(response);
-          return;
-        }
+      if (result.rows.length === 0) {
         const response: ApiResponse = {
           success: false,
-          error: { message: error.message }
+          error: { message: 'Record not found' }
         };
-        res.status(400).json(response);
+        res.status(404).json(response);
         return;
       }
 
       const response: ApiResponse = {
         success: true,
-        data
+        data: result.rows[0]
       };
       res.json(response);
     } catch (error) {
@@ -131,32 +129,29 @@ const createGenericRoutes = (tableName: string) => {
         error: { message: 'Internal server error' }
       };
       res.status(500).json(response);
+    } finally {
+      client.release();
     }
   });
 
   // Create new record
   routes.post('/', async (req: Request<{}, ApiResponse, any>, res: Response<ApiResponse>) => {
+    const client = await postgresPool.connect();
     try {
-      const { data, error } = await supabase
-        .from(tableName)
-        .insert([req.body])
-        .select()
-        .single();
+      const columns = Object.keys(req.body);
+      const values = Object.values(req.body);
+      const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
 
-      if (error) {
-        const response: ApiResponse = {
-          success: false,
-          error: { message: error.message }
-        };
-        res.status(400).json(response);
-        return;
-      }
+      const result = await client.query(
+        `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+        values
+      );
 
       const response: ApiResponse = {
         success: true,
         data: {
           message: 'Record created successfully',
-          ...data
+          ...result.rows[0]
         }
       };
       res.status(201).json(response);
@@ -166,35 +161,31 @@ const createGenericRoutes = (tableName: string) => {
         error: { message: 'Internal server error' }
       };
       res.status(500).json(response);
+    } finally {
+      client.release();
     }
   });
 
   // Update record
   routes.put('/:id', async (req: Request<{ id: string }, ApiResponse, any>, res: Response<ApiResponse>) => {
+    const client = await postgresPool.connect();
     try {
       const { id } = req.params;
+      const columns = Object.keys(req.body);
+      const values = Object.values(req.body);
+      const setClause = columns.map((col, index) => `${col} = $${index + 1}`).join(', ');
 
-      const { data, error } = await supabase
-        .from(tableName)
-        .update(req.body)
-        .eq('id', id)
-        .select()
-        .single();
+      const result = await client.query(
+        `UPDATE ${tableName} SET ${setClause} WHERE id = $${columns.length + 1} RETURNING *`,
+        [...values, id]
+      );
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          const response: ApiResponse = {
-            success: false,
-            error: { message: 'Record not found' }
-          };
-          res.status(404).json(response);
-          return;
-        }
+      if (result.rows.length === 0) {
         const response: ApiResponse = {
           success: false,
-          error: { message: error.message }
+          error: { message: 'Record not found' }
         };
-        res.status(400).json(response);
+        res.status(404).json(response);
         return;
       }
 
@@ -202,7 +193,7 @@ const createGenericRoutes = (tableName: string) => {
         success: true,
         data: {
           message: 'Record updated successfully',
-          ...data
+          ...result.rows[0]
         }
       };
       res.json(response);
@@ -212,35 +203,28 @@ const createGenericRoutes = (tableName: string) => {
         error: { message: 'Internal server error' }
       };
       res.status(500).json(response);
+    } finally {
+      client.release();
     }
   });
 
   // Delete record
   routes.delete('/:id', async (req: Request<{ id: string }>, res: Response<ApiResponse>) => {
+    const client = await postgresPool.connect();
     try {
       const { id } = req.params;
 
-      const { data, error } = await supabase
-        .from(tableName)
-        .delete()
-        .eq('id', id)
-        .select()
-        .single();
+      const result = await client.query(
+        `DELETE FROM ${tableName} WHERE id = $1 RETURNING *`,
+        [id]
+      );
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          const response: ApiResponse = {
-            success: false,
-            error: { message: 'Record not found' }
-          };
-          res.status(404).json(response);
-          return;
-        }
+      if (result.rows.length === 0) {
         const response: ApiResponse = {
           success: false,
-          error: { message: error.message }
+          error: { message: 'Record not found' }
         };
-        res.status(400).json(response);
+        res.status(404).json(response);
         return;
       }
 
@@ -248,7 +232,7 @@ const createGenericRoutes = (tableName: string) => {
         success: true,
         data: {
           message: 'Record deleted successfully',
-          ...data
+          ...result.rows[0]
         }
       };
       res.json(response);
@@ -258,6 +242,8 @@ const createGenericRoutes = (tableName: string) => {
         error: { message: 'Internal server error' }
       };
       res.status(500).json(response);
+    } finally {
+      client.release();
     }
   });
 
@@ -275,26 +261,17 @@ router.use('/orders', createGenericRoutes('orders'));
 
 // Custom endpoint for database info
 router.get('/info', async (_req: Request, res: Response<ApiResponse<DatabaseInfo>>) => {
+  const client = await postgresPool.connect();
   try {
     // Get list of tables (this requires appropriate permissions)
-    const { data: tables, error } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_schema', 'public');
-
-    if (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: { message: 'Unable to fetch database info' }
-      };
-      res.status(400).json(response);
-      return;
-    }
+    const result = await client.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
+    );
 
     const response: ApiResponse<DatabaseInfo> = {
       success: true,
       data: {
-        tables: tables?.map(t => t.table_name) || [],
+        tables: result.rows.map((r: any) => r.table_name) || [],
         message: 'Database connection successful'
       }
     };
@@ -305,11 +282,14 @@ router.get('/info', async (_req: Request, res: Response<ApiResponse<DatabaseInfo
       error: { message: 'Internal server error' }
     };
     res.status(500).json(response);
+  } finally {
+    client.release();
   }
 });
 
 // Custom query endpoint
 router.post('/query', async (req: Request<{}, ApiResponse, CustomQueryRequest>, res: Response<ApiResponse>) => {
+  const client = await postgresPool.connect();
   try {
     const { table, select = '*', filters = {}, orderBy, limit = 100 } = req.body;
 
@@ -322,37 +302,38 @@ router.post('/query', async (req: Request<{}, ApiResponse, CustomQueryRequest>, 
       return;
     }
 
-    let query = supabase.from(table).select(select);
+    // Build WHERE clause
+    const whereConditions: string[] = [];
+    const queryParams: any[] = [];
+    let paramIndex = 1;
 
     // Apply filters
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== null && value !== undefined) {
-        query = query.eq(key, value);
+        whereConditions.push(`${key} = $${paramIndex}`);
+        queryParams.push(value);
+        paramIndex++;
       }
     });
 
-    // Apply ordering
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    // Build ORDER BY clause
+    let orderClause = '';
     if (orderBy) {
-      query = query.order(orderBy.column, { ascending: orderBy.ascending !== false });
+      const direction = orderBy.ascending !== false ? 'ASC' : 'DESC';
+      orderClause = `ORDER BY ${orderBy.column} ${direction}`;
     }
 
-    // Apply limit
-    query = query.limit(limit);
+    // Build query
+    const query = `SELECT ${select} FROM ${table} ${whereClause} ${orderClause} LIMIT $${paramIndex}`;
+    queryParams.push(limit);
 
-    const { data, error } = await query;
-
-    if (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: { message: error.message }
-      };
-      res.status(400).json(response);
-      return;
-    }
+    const result = await client.query(query, queryParams);
 
     const response: ApiResponse = {
       success: true,
-      data
+      data: result.rows
     };
     res.json(response);
   } catch (error) {
@@ -361,6 +342,8 @@ router.post('/query', async (req: Request<{}, ApiResponse, CustomQueryRequest>, 
       error: { message: 'Internal server error' }
     };
     res.status(500).json(response);
+  } finally {
+    client.release();
   }
 });
 

@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import authRoutes from './auth.js';
 import dataRoutes from './data.js';
 import { ApiResponse } from '../types/index.js';
+import { config } from '../config/environment.js';
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ router.get('/', (req: Request, res: Response) => {
   const response: ApiResponse = {
     success: true,
     data: {
-      message: 'FemiMed API',
+      message: `${config.sistema.clinicaNombre} API`,
       version: '1.0.0',
       endpoints: {
         auth: '/auth',

@@ -1,4 +1,4 @@
-import { SupabaseRepository } from './base.repository.js';
+import { PostgresRepository } from './postgres.repository.js';
 
 export interface UserData {
   id?: string;
@@ -14,27 +14,18 @@ export interface UserData {
   updated_at?: string;
 }
 
-export class UserRepository extends SupabaseRepository<UserData> {
+export class UserRepository extends PostgresRepository<UserData> {
   constructor() {
     super('users');
   }
 
   async findByEmail(email: string): Promise<UserData | null> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('email', email)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return null;
-        }
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data;
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE email = $1 LIMIT 1`,
+        [email]
+      );
+      return result.rows.length > 0 ? result.rows[0] : null;
     } catch (error) {
       throw new Error(`Failed to find user by email: ${(error as Error).message}`);
     }
@@ -42,16 +33,11 @@ export class UserRepository extends SupabaseRepository<UserData> {
 
   async findUsersByRole(role: string): Promise<UserData[]> {
     try {
-      const { data, error } = await this.client
-        .from(this.tableName)
-        .select('*')
-        .eq('user_metadata->role', role);
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
-
-      return data || [];
+      const result = await this.query(
+        `SELECT * FROM ${this.tableName} WHERE user_metadata->>'role' = $1`,
+        [role]
+      );
+      return result.rows;
     } catch (error) {
       throw new Error(`Failed to find users by role: ${(error as Error).message}`);
     }
@@ -59,19 +45,13 @@ export class UserRepository extends SupabaseRepository<UserData> {
 
   async updateLastLogin(id: string): Promise<void> {
     try {
-      const { error } = await this.client
-        .from(this.tableName)
-        .update({ 
-          updated_at: new Date().toISOString(),
-          user_metadata: {
-            last_login: new Date().toISOString()
-          }
-        })
-        .eq('id', id);
-
-      if (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
+      await this.query(
+        `UPDATE ${this.tableName} 
+         SET updated_at = NOW(), 
+             user_metadata = jsonb_set(COALESCE(user_metadata, '{}'::jsonb), '{last_login}', to_jsonb(NOW()::text))
+         WHERE id = $1`,
+        [id]
+      );
     } catch (error) {
       throw new Error(`Failed to update last login: ${(error as Error).message}`);
     }
