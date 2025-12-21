@@ -110,7 +110,7 @@ export class MensajeController {
         return;
       }
 
-      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
       const client = await postgresPool.connect();
       try {
         await client.query('BEGIN');
@@ -310,7 +310,7 @@ export class MensajeController {
     }
   }
 
-  // Obtener pacientes para difusión
+  // Obtener pacientes para difusiÃ³n
   static async getPacientesParaDifusion(req: Request, res: Response): Promise<void> {
     try {
       const { busqueda, activos } = req.query;
@@ -366,7 +366,7 @@ export class MensajeController {
         sexo: paciente.sexo ?? '',
         activo: paciente.activo,
         cedula: paciente.cedula,
-          medico_nombre: 'Sin médico asignado',
+          medico_nombre: 'Sin mÃ©dico asignado',
           especialidad_nombre: 'Sin especialidad',
           seleccionado: false
         })) || [];
@@ -456,7 +456,7 @@ export class MensajeController {
           const email = destinatario.email || destinatario.paciente_email;
           
           if (!email) {
-            console.warn(`⚠️ Destinatario ${destinatario.paciente_id} no tiene email`);
+            console.warn(`âš ï¸ Destinatario ${destinatario.paciente_id} no tiene email`);
             // Actualizar como fallido
             await client.query(
               `UPDATE mensajes_destinatarios
@@ -468,7 +468,7 @@ export class MensajeController {
             continue;
           }
 
-          // Preparar plantilla del mensaje de difusión
+          // Preparar plantilla del mensaje de difusiÃ³n
           const emailTemplate = {
             subject: mensaje.titulo,
             html: `
@@ -488,7 +488,7 @@ export class MensajeController {
               <body>
                 <div class="container">
                   <div class="header">
-                    <h1>📧 ${config.sistema.clinicaNombre}</h1>
+                    <h1>ðŸ“§ ${config.sistema.clinicaNombre}</h1>
                     <h2>${mensaje.titulo}</h2>
                   </div>
                   <div class="content">
@@ -500,13 +500,13 @@ export class MensajeController {
                   </div>
                   <div class="footer">
                     <p>${config.sistema.clinicaNombre}</p>
-                    <p>Este es un mensaje automático, por favor no responder a este email.</p>
+                    <p>Este es un mensaje automÃ¡tico, por favor no responder a este email.</p>
                   </div>
                 </div>
               </body>
               </html>
             `,
-            text: mensaje.contenido.replace(/<[^>]*>/g, '') // Versión texto plano
+            text: mensaje.contenido.replace(/<[^>]*>/g, '') // VersiÃ³n texto plano
           };
 
           // Enviar email
@@ -534,10 +534,10 @@ export class MensajeController {
 
           if (resultadoEnvio) {
             enviados++;
-            console.log(`✅ Email enviado exitosamente a ${email}`);
+            console.log(`âœ… Email enviado exitosamente a ${email}`);
           } else {
             fallidos++;
-            console.error(`❌ Error enviando email a ${email}`);
+            console.error(`âŒ Error enviando email a ${email}`);
           }
         }
 
@@ -559,7 +559,7 @@ export class MensajeController {
             fallidos,
             mensaje: enviados > 0 
               ? `Mensaje enviado a ${enviados} destinatario${enviados !== 1 ? 's' : ''}`
-              : 'Error: No se pudo enviar el mensaje a ningún destinatario'
+              : 'Error: No se pudo enviar el mensaje a ningÃºn destinatario'
           }
         });
       } finally {
@@ -662,7 +662,7 @@ export class MensajeController {
     }
   }
 
-  // Obtener destinatarios actuales con información completa del paciente
+  // Obtener destinatarios actuales con informaciÃ³n completa del paciente
   static async getDestinatariosActuales(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -708,7 +708,7 @@ export class MensajeController {
           activo: dest.activo,
           cedula: dest.cedula,
           estado_envio: dest.estado_envio,
-          seleccionado: true // Ya están seleccionados
+          seleccionado: true // Ya estÃ¡n seleccionados
         }));
 
         res.json({
@@ -890,7 +890,7 @@ export class MensajeController {
     }
   }
 
-  // Diagnosticar destinatarios de un mensaje específico
+  // Diagnosticar destinatarios de un mensaje especÃ­fico
   static async diagnosticarDestinatarios(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -997,12 +997,12 @@ export class MensajeController {
     }
   }
 
-  // Obtener estadísticas
+  // Obtener estadÃ­sticas
   static async getEstadisticas(_req: Request, res: Response): Promise<void> {
     try {
       const client = await postgresPool.connect();
       try {
-        // Obtener estadísticas básicas
+        // Obtener estadÃ­sticas bÃ¡sicas
         const result = await client.query(
           'SELECT estado, total_destinatarios, total_enviados, total_fallidos FROM mensajes_difusion'
         );
@@ -1076,7 +1076,7 @@ export class MensajeController {
             mensajeOriginal.tipo_mensaje,
             'borrador',
             mensajeOriginal.creado_por,
-            mensajeOriginal.clinica_alias || process.env['CLINICA_ALIAS'] || 'demomed'
+            mensajeOriginal.clinica_alias || process.env['CLINICA_ALIAS'] || 'FemiMed'
           ]
         );
 

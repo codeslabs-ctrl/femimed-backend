@@ -66,7 +66,7 @@ export class MedicoController {
     try {
       const client = await postgresPool.connect();
       try {
-        // Obtener médicos con JOIN a especialidades
+        // Obtener mÃ©dicos con JOIN a especialidades
         const medicosResult = await client.query(`
           SELECT m.*, e.nombre_especialidad
           FROM medicos m
@@ -97,10 +97,10 @@ export class MedicoController {
 
   async createMedico(req: Request<{}, ApiResponse, { nombres: string; apellidos: string; cedula?: string; email: string; telefono: string; especialidad_id: number; mpps?: string; cm?: string }>, res: Response<ApiResponse>): Promise<void> {
     try {
-      console.log('📥 Datos recibidos en createMedico:', req.body);
+      console.log('ðŸ“¥ Datos recibidos en createMedico:', req.body);
       const { nombres, apellidos, cedula, email, telefono, especialidad_id, mpps, cm } = req.body;
 
-      console.log('🔍 Validando campos:');
+      console.log('ðŸ” Validando campos:');
       console.log('  - nombres:', nombres, typeof nombres);
       console.log('  - apellidos:', apellidos, typeof apellidos);
       console.log('  - cedula:', cedula, typeof cedula);
@@ -109,7 +109,7 @@ export class MedicoController {
       console.log('  - especialidad_id:', especialidad_id, typeof especialidad_id);
 
       if (!nombres || !apellidos || !email || !telefono || !especialidad_id) {
-        console.log('❌ Validación falló - campos faltantes');
+        console.log('âŒ ValidaciÃ³n fallÃ³ - campos faltantes');
         const response: ApiResponse = {
           success: false,
           error: { message: 'All fields are required' }
@@ -118,11 +118,11 @@ export class MedicoController {
         return;
       }
 
-      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
 
       const client = await postgresPool.connect();
       try {
-        // Iniciar transacción
+        // Iniciar transacciÃ³n
         await client.query('BEGIN');
 
         // Verificar si el email ya existe
@@ -135,13 +135,13 @@ export class MedicoController {
           await client.query('ROLLBACK');
           const response: ApiResponse = {
             success: false,
-            error: { message: 'El email ya está registrado en el sistema' }
+            error: { message: 'El email ya estÃ¡ registrado en el sistema' }
           };
           res.status(400).json(response);
           return;
         }
 
-        // Verificar si la cédula ya existe (si se proporciona)
+        // Verificar si la cÃ©dula ya existe (si se proporciona)
         if (cedula) {
           const cedulaCheck = await client.query(
             'SELECT id FROM medicos WHERE cedula = $1',
@@ -152,7 +152,7 @@ export class MedicoController {
             await client.query('ROLLBACK');
             const response: ApiResponse = {
               success: false,
-              error: { message: 'La cédula ya está registrada en el sistema' }
+              error: { message: 'La cÃ©dula ya estÃ¡ registrada en el sistema' }
             };
             res.status(400).json(response);
             return;
@@ -182,16 +182,16 @@ export class MedicoController {
         const username = email.split('@')[0];
         
         if (!username) {
-          throw new Error('Email inválido: no se puede generar username');
+          throw new Error('Email invÃ¡lido: no se puede generar username');
         }
         
-        // Generar OTP de 8 dígitos
+        // Generar OTP de 8 dÃ­gitos
         const otp = Math.floor(10000000 + Math.random() * 90000000).toString();
         
         // Hash del OTP
         const hashedOtp = await bcrypt.hash(otp, 10);
         
-        // Crear usuario con OTP temporal dentro de la transacción
+        // Crear usuario con OTP temporal dentro de la transacciÃ³n
         const usuarioResult = await client.query(
           `INSERT INTO usuarios (username, email, password_hash, rol, medico_id, activo, verificado, first_login, password_changed_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -201,15 +201,15 @@ export class MedicoController {
 
         const newUser = usuarioResult.rows[0];
 
-        // Confirmar transacción (médico, medicos_clinicas y usuario)
+        // Confirmar transacciÃ³n (mÃ©dico, medicos_clinicas y usuario)
         await client.query('COMMIT');
 
         // Enviar email con OTP
-        console.log('🚀 INICIANDO PROCESO DE EMAIL...');
+        console.log('ðŸš€ INICIANDO PROCESO DE EMAIL...');
         try {
-          console.log('📧 Intentando enviar email a:', email);
-          console.log('📧 Username generado:', username);
-          console.log('📧 OTP generado:', otp);
+          console.log('ðŸ“§ Intentando enviar email a:', email);
+          console.log('ðŸ“§ Username generado:', username);
+          console.log('ðŸ“§ OTP generado:', otp);
           
           const emailService = new EmailService();
           const emailSent = await emailService.sendMedicoWelcomeEmail(
@@ -224,17 +224,17 @@ export class MedicoController {
           );
 
           if (emailSent) {
-            console.log('✅ Email enviado exitosamente');
+            console.log('âœ… Email enviado exitosamente');
           } else {
-            console.warn('⚠️ Email no enviado, pero médico y usuario creados correctamente');
+            console.warn('âš ï¸ Email no enviado, pero mÃ©dico y usuario creados correctamente');
           }
         } catch (emailError) {
-          console.error('❌ Error enviando email:', emailError);
-          console.error('❌ Detalles del error:', (emailError as Error).message);
-          // No fallar la creación si falla el email
+          console.error('âŒ Error enviando email:', emailError);
+          console.error('âŒ Detalles del error:', (emailError as Error).message);
+          // No fallar la creaciÃ³n si falla el email
         }
 
-        console.log('🏁 FINALIZANDO PROCESO DE EMAIL...');
+        console.log('ðŸ FINALIZANDO PROCESO DE EMAIL...');
 
         const response: ApiResponse = {
           success: true,
@@ -247,24 +247,24 @@ export class MedicoController {
               rol: newUser.rol,
               first_login: newUser.first_login
             },
-            message: 'Médico creado exitosamente. Se ha enviado un OTP por email para el primer acceso.'
+            message: 'MÃ©dico creado exitosamente. Se ha enviado un OTP por email para el primer acceso.'
           }
         };
         res.status(201).json(response);
       } catch (dbError: any) {
-        // Revertir transacción en caso de error
+        // Revertir transacciÃ³n en caso de error
         try {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
-          console.error('❌ Error al hacer rollback:', rollbackError);
+          console.error('âŒ Error al hacer rollback:', rollbackError);
         }
-        console.error('❌ PostgreSQL error creating medico:', dbError);
+        console.error('âŒ PostgreSQL error creating medico:', dbError);
         
-        // Verificar errores específicos
+        // Verificar errores especÃ­ficos
         if (dbError.code === '23505') { // Unique violation
           const response: ApiResponse = {
             success: false,
-            error: { message: 'Ya existe un médico con ese email o cédula' }
+            error: { message: 'Ya existe un mÃ©dico con ese email o cÃ©dula' }
           };
           res.status(400).json(response);
           return;
@@ -279,10 +279,10 @@ export class MedicoController {
           return;
         }
         
-        // Error genérico para el usuario
+        // Error genÃ©rico para el usuario
         const response: ApiResponse = {
           success: false,
-          error: { message: 'No se pudo crear el médico. Por favor, verifique los datos e intente nuevamente.' }
+          error: { message: 'No se pudo crear el mÃ©dico. Por favor, verifique los datos e intente nuevamente.' }
         };
         res.status(400).json(response);
       } finally {
@@ -314,7 +314,7 @@ export class MedicoController {
 
       const client = await postgresPool.connect();
       try {
-        // Verificar si el email ya existe en otro médico (si se está actualizando)
+        // Verificar si el email ya existe en otro mÃ©dico (si se estÃ¡ actualizando)
         if (updateData.email) {
           const emailCheck = await client.query(
             'SELECT id FROM medicos WHERE email = $1 AND id != $2',
@@ -324,14 +324,14 @@ export class MedicoController {
           if (emailCheck.rows.length > 0) {
             const response: ApiResponse = {
               success: false,
-              error: { message: 'El email ya está registrado en el sistema' }
+              error: { message: 'El email ya estÃ¡ registrado en el sistema' }
             };
             res.status(400).json(response);
             return;
           }
         }
 
-        // Verificar si la cédula ya existe en otro médico (si se está actualizando)
+        // Verificar si la cÃ©dula ya existe en otro mÃ©dico (si se estÃ¡ actualizando)
         if (updateData.cedula) {
           const cedulaCheck = await client.query(
             'SELECT id FROM medicos WHERE cedula = $1 AND id != $2',
@@ -341,14 +341,14 @@ export class MedicoController {
           if (cedulaCheck.rows.length > 0) {
             const response: ApiResponse = {
               success: false,
-              error: { message: 'La cédula ya está registrada en el sistema' }
+              error: { message: 'La cÃ©dula ya estÃ¡ registrada en el sistema' }
             };
             res.status(400).json(response);
             return;
           }
         }
 
-        // Construir query dinámico para UPDATE
+        // Construir query dinÃ¡mico para UPDATE
         const setClauses: string[] = [];
         const values: any[] = [];
         let paramIndex = 1;
@@ -416,7 +416,7 @@ export class MedicoController {
         if (result.rows.length === 0) {
           const response: ApiResponse = {
             success: false,
-            error: { message: 'Médico no encontrado' }
+            error: { message: 'MÃ©dico no encontrado' }
           };
           res.status(404).json(response);
           return;
@@ -428,12 +428,12 @@ export class MedicoController {
         };
         res.json(response);
       } catch (dbError: any) {
-        console.error('❌ PostgreSQL error updating medico:', dbError);
+        console.error('âŒ PostgreSQL error updating medico:', dbError);
         
         if (dbError.code === '23505') { // Unique violation
           const response: ApiResponse = {
             success: false,
-            error: { message: 'Ya existe un médico con ese email o cédula' }
+            error: { message: 'Ya existe un mÃ©dico con ese email o cÃ©dula' }
           };
           res.status(400).json(response);
           return;
@@ -450,17 +450,17 @@ export class MedicoController {
         
         const response: ApiResponse = {
           success: false,
-          error: { message: 'No se pudo actualizar el médico. Por favor, verifique los datos e intente nuevamente.' }
+          error: { message: 'No se pudo actualizar el mÃ©dico. Por favor, verifique los datos e intente nuevamente.' }
         };
         res.status(400).json(response);
       } finally {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error updating medico:', error);
+      console.error('âŒ Error updating medico:', error);
       const response: ApiResponse = {
         success: false,
-        error: { message: 'No se pudo actualizar el médico. Por favor, verifique los datos e intente nuevamente.' }
+        error: { message: 'No se pudo actualizar el mÃ©dico. Por favor, verifique los datos e intente nuevamente.' }
       };
       res.status(400).json(response);
     }
@@ -474,7 +474,7 @@ export class MedicoController {
       if (isNaN(medicoId) || medicoId <= 0) {
         const response: ApiResponse = {
           success: false,
-          error: { message: 'ID de médico inválido' }
+          error: { message: 'ID de mÃ©dico invÃ¡lido' }
         };
         res.status(400).json(response);
         return;
@@ -482,7 +482,7 @@ export class MedicoController {
 
       const client = await postgresPool.connect();
       try {
-        // Verificar que el médico existe
+        // Verificar que el mÃ©dico existe
         const medicoCheck = await client.query(
           'SELECT id, nombres, apellidos, activo FROM medicos WHERE id = $1',
           [medicoId]
@@ -491,7 +491,7 @@ export class MedicoController {
         if (medicoCheck.rows.length === 0) {
           const response: ApiResponse = {
             success: false,
-            error: { message: 'Médico no encontrado' }
+            error: { message: 'MÃ©dico no encontrado' }
           };
           res.status(404).json(response);
           return;
@@ -499,17 +499,17 @@ export class MedicoController {
 
         const medico = medicoCheck.rows[0];
 
-        // Verificar si el médico ya está inactivo
+        // Verificar si el mÃ©dico ya estÃ¡ inactivo
         if (!medico.activo) {
           const response: ApiResponse = {
             success: false,
-            error: { message: 'El médico ya está inactivo' }
+            error: { message: 'El mÃ©dico ya estÃ¡ inactivo' }
           };
           res.status(400).json(response);
           return;
         }
 
-        // Verificar si el médico tiene pacientes tratados
+        // Verificar si el mÃ©dico tiene pacientes tratados
         const tienePacientesTratados = await this.verificarPacientesTratados(medicoId);
 
         if (tienePacientesTratados) {
@@ -519,19 +519,19 @@ export class MedicoController {
           const response: ApiResponse = {
             success: true,
             data: { 
-              message: `Médico ${medico.nombres} ${medico.apellidos} marcado como inactivo (tiene pacientes tratados)`,
+              message: `MÃ©dico ${medico.nombres} ${medico.apellidos} marcado como inactivo (tiene pacientes tratados)`,
               accion: 'desactivado'
             }
           };
           res.json(response);
         } else {
-          // Eliminación física completa
+          // EliminaciÃ³n fÃ­sica completa
           await this.eliminarMedicoFisicamente(medicoId);
           
           const response: ApiResponse = {
             success: true,
             data: { 
-              message: `Médico ${medico.nombres} ${medico.apellidos} eliminado completamente del sistema`,
+              message: `MÃ©dico ${medico.nombres} ${medico.apellidos} eliminado completamente del sistema`,
               accion: 'eliminado'
             }
           };
@@ -542,7 +542,7 @@ export class MedicoController {
       }
 
     } catch (error) {
-      console.error('Error eliminando médico:', error);
+      console.error('Error eliminando mÃ©dico:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: (error as Error).message }
@@ -552,7 +552,7 @@ export class MedicoController {
   }
 
   /**
-   * Verifica si un médico tiene pacientes tratados (solo consultas finalizadas)
+   * Verifica si un mÃ©dico tiene pacientes tratados (solo consultas finalizadas)
    */
   private async verificarPacientesTratados(medicoId: number): Promise<boolean> {
     try {
@@ -571,7 +571,7 @@ export class MedicoController {
           return true;
         }
 
-        // Verificar historial médico
+        // Verificar historial mÃ©dico
         const historialResult = await client.query(
           'SELECT id FROM historico_pacientes WHERE medico_id = $1 LIMIT 1',
           [medicoId]
@@ -581,7 +581,7 @@ export class MedicoController {
           return true;
         }
 
-        // Verificar informes médicos
+        // Verificar informes mÃ©dicos
         const informesResult = await client.query(
           'SELECT id FROM informes_medicos WHERE medico_id = $1 LIMIT 1',
           [medicoId]
@@ -602,15 +602,15 @@ export class MedicoController {
   }
 
   /**
-   * Marca un médico como inactivo
+   * Marca un mÃ©dico como inactivo
    */
   private async marcarMedicoComoInactivo(medicoId: number): Promise<void> {
     const client = await postgresPool.connect();
     try {
-      // Iniciar transacción
+      // Iniciar transacciÃ³n
       await client.query('BEGIN');
 
-      // Marcar médico como inactivo
+      // Marcar mÃ©dico como inactivo
       await client.query(
         'UPDATE medicos SET activo = false, fecha_actualizacion = CURRENT_TIMESTAMP WHERE id = $1',
         [medicoId]
@@ -622,18 +622,18 @@ export class MedicoController {
         [medicoId]
       );
 
-      // Confirmar transacción
+      // Confirmar transacciÃ³n
       await client.query('COMMIT');
 
-      console.log(`✅ Médico ${medicoId} marcado como inactivo`);
+      console.log(`âœ… MÃ©dico ${medicoId} marcado como inactivo`);
     } catch (error) {
-      // Revertir transacción en caso de error
+      // Revertir transacciÃ³n en caso de error
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error('❌ Error al hacer rollback:', rollbackError);
+        console.error('âŒ Error al hacer rollback:', rollbackError);
       }
-      console.error('Error marcando médico como inactivo:', error);
+      console.error('Error marcando mÃ©dico como inactivo:', error);
       throw error;
     } finally {
       client.release();
@@ -641,39 +641,39 @@ export class MedicoController {
   }
 
   /**
-   * Elimina físicamente un médico del sistema
+   * Elimina fÃ­sicamente un mÃ©dico del sistema
    */
   private async eliminarMedicoFisicamente(medicoId: number): Promise<void> {
     const client = await postgresPool.connect();
     try {
-      // Iniciar transacción
+      // Iniciar transacciÃ³n
       await client.query('BEGIN');
 
       // Eliminar usuario asociado primero (por las foreign keys)
-      // La tabla medicos_clinicas se eliminará automáticamente por ON DELETE CASCADE
+      // La tabla medicos_clinicas se eliminarÃ¡ automÃ¡ticamente por ON DELETE CASCADE
       await client.query(
         'DELETE FROM usuarios WHERE medico_id = $1',
         [medicoId]
       );
 
-      // Eliminar médico (esto también eliminará medicos_clinicas por CASCADE)
+      // Eliminar mÃ©dico (esto tambiÃ©n eliminarÃ¡ medicos_clinicas por CASCADE)
       await client.query(
         'DELETE FROM medicos WHERE id = $1',
         [medicoId]
       );
 
-      // Confirmar transacción
+      // Confirmar transacciÃ³n
       await client.query('COMMIT');
 
-      console.log(`✅ Médico ${medicoId} eliminado físicamente del sistema`);
+      console.log(`âœ… MÃ©dico ${medicoId} eliminado fÃ­sicamente del sistema`);
     } catch (error) {
-      // Revertir transacción en caso de error
+      // Revertir transacciÃ³n en caso de error
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error('❌ Error al hacer rollback:', rollbackError);
+        console.error('âŒ Error al hacer rollback:', rollbackError);
       }
-      console.error('Error eliminando médico físicamente:', error);
+      console.error('Error eliminando mÃ©dico fÃ­sicamente:', error);
       throw error;
     } finally {
       client.release();
@@ -693,7 +693,7 @@ export class MedicoController {
         return;
       }
 
-      // Escapar caracteres especiales para la búsqueda
+      // Escapar caracteres especiales para la bÃºsqueda
       const searchTerm = q.trim();
 
       const client = await postgresPool.connect();
@@ -702,7 +702,7 @@ export class MedicoController {
         const params: any[] = [];
         const searchPattern = `%${searchTerm}%`;
 
-        // Si el término parece un email, buscar solo por email
+        // Si el tÃ©rmino parece un email, buscar solo por email
         if (searchTerm.includes('@')) {
           sqlQuery = `
             SELECT m.*, e.nombre_especialidad
@@ -713,7 +713,7 @@ export class MedicoController {
           `;
           params.push(searchPattern);
         } else {
-          // Para otros términos, buscar en nombres, apellidos y email
+          // Para otros tÃ©rminos, buscar en nombres, apellidos y email
           sqlQuery = `
             SELECT m.*, e.nombre_especialidad
             FROM medicos m
@@ -728,7 +728,7 @@ export class MedicoController {
 
         const result = await client.query(sqlQuery, params);
 
-        // Combinar médicos con nombres de especialidades
+        // Combinar mÃ©dicos con nombres de especialidades
         const medicosWithEspecialidad = result.rows.map(medico => ({
           ...medico,
           especialidad_nombre: medico.nombre_especialidad || 'Especialidad no encontrada'
@@ -740,17 +740,17 @@ export class MedicoController {
         };
         res.json(response);
       } catch (dbError) {
-        console.error('❌ PostgreSQL error in searchMedicos:', dbError);
+        console.error('âŒ PostgreSQL error in searchMedicos:', dbError);
         const response: ApiResponse = {
           success: false,
-          error: { message: 'Error al buscar médicos' }
+          error: { message: 'Error al buscar mÃ©dicos' }
         };
         res.status(500).json(response);
       } finally {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error en searchMedicos:', error);
+      console.error('âŒ Error en searchMedicos:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: (error as Error).message }

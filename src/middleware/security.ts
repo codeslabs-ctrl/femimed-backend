@@ -16,11 +16,11 @@ declare global {
 // Headers de seguridad
 export const securityHeaders = helmet();
 
-// CORS configurado para DemoMed
+// CORS configurado para FemiMed
 const allowedOrigins = [
   process.env['FRONTEND_URL'] || 'http://localhost:4200',
-  'https://demomed.codes-labs.com',
-  'https://www.demomed.codes-labs.com',
+  'https://FemiMed.codes-labs.com',
+  'https://www.FemiMed.codes-labs.com',
   'http://localhost:4200' // Desarrollo
 ].filter(Boolean); // Elimina valores undefined/null
 
@@ -31,7 +31,7 @@ export const corsMiddleware = cors({
       return callback(null, true);
     }
     
-    // Verificar si el origen está permitido
+    // Verificar si el origen estÃ¡ permitido
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -43,9 +43,9 @@ export const corsMiddleware = cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 });
 
-// Rate limiting eliminado - No se aplican límites de tiempo a las peticiones
+// Rate limiting eliminado - No se aplican lÃ­mites de tiempo a las peticiones
 
-// Middleware de autenticación JWT
+// Middleware de autenticaciÃ³n JWT
 export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -57,7 +57,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
 
   jwt.verify(token, process.env['JWT_SECRET'] || 'default-secret', (err: any, user: any) => {
     if (err) {
-      res.status(403).json({ error: 'Token inválido' });
+      res.status(403).json({ error: 'Token invÃ¡lido' });
       return;
     }
     req.user = user;
@@ -65,7 +65,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   });
 };
 
-// Middleware de autorización por roles
+// Middleware de autorizaciÃ³n por roles
 export const requireRole = (roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
@@ -82,11 +82,11 @@ export const requireRole = (roles: string[]) => {
       'admin': ['admin', 'administrador'] // Para compatibilidad
     };
     
-    // Verificar si el rol del usuario está permitido
+    // Verificar si el rol del usuario estÃ¡ permitido
     const allowedRoles = roles.flatMap(role => roleMapping[role] || [role]);
     
     if (!allowedRoles.includes(userRole)) {
-      console.log(`🚫 Acceso denegado: Usuario rol="${userRole}", Roles requeridos=${roles.join(',')}`);
+      console.log(`ðŸš« Acceso denegado: Usuario rol="${userRole}", Roles requeridos=${roles.join(',')}`);
       res.status(403).json({ 
         error: 'Acceso denegado',
         details: `Rol requerido: ${roles.join(' o ')}, Rol actual: ${userRole}`
@@ -98,25 +98,25 @@ export const requireRole = (roles: string[]) => {
   };
 };
 
-// Middleware de validación de input
+// Middleware de validaciÃ³n de input
 export const validateInput = (schema: Joi.ObjectSchema) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const { error } = schema.validate(req.body);
     if (error) {
-      res.status(400).json({ error: error.details[0]?.message || 'Error de validación' });
+      res.status(400).json({ error: error.details[0]?.message || 'Error de validaciÃ³n' });
       return;
     }
     next();
   };
 };
 
-// Validación específica para login
+// ValidaciÃ³n especÃ­fica para login
 export const validateLogin = validateInput(Joi.object({
   username: Joi.string().min(3).required(),
   password: Joi.string().min(6).required()
 }));
 
-// Validación específica para informes médicos
+// ValidaciÃ³n especÃ­fica para informes mÃ©dicos
 export const validateInforme = validateInput(Joi.object({
   titulo: Joi.string().min(5).max(200).required(),
   tipo_informe: Joi.string().required(),
@@ -130,7 +130,7 @@ export const validateInforme = validateInput(Joi.object({
   creado_por: Joi.number().required()
 }));
 
-// Validación para actualización de informes (campos opcionales)
+// ValidaciÃ³n para actualizaciÃ³n de informes (campos opcionales)
 export const validateInformeUpdate = validateInput(Joi.object({
   titulo: Joi.string().min(5).max(200).optional(),
   tipo_informe: Joi.string().optional(),
@@ -145,7 +145,7 @@ export const validateInformeUpdate = validateInput(Joi.object({
   creado_por: Joi.number().optional()
 }));
 
-// Validación específica para pacientes (solo datos básicos)
+// ValidaciÃ³n especÃ­fica para pacientes (solo datos bÃ¡sicos)
 export const validatePaciente = validateInput(Joi.object({
   nombres: Joi.string().min(2).required(),
   apellidos: Joi.string().min(2).required(),
@@ -157,7 +157,7 @@ export const validatePaciente = validateInput(Joi.object({
   activo: Joi.boolean().optional()
 }));
 
-// Validación para actualización de pacientes (incluye campos médicos opcionales)
+// ValidaciÃ³n para actualizaciÃ³n de pacientes (incluye campos mÃ©dicos opcionales)
 export const validatePacienteUpdate = validateInput(Joi.object({
   nombres: Joi.string().min(2).optional(),
   apellidos: Joi.string().min(2).optional(),
@@ -172,7 +172,7 @@ export const validatePacienteUpdate = validateInput(Joi.object({
   plan: Joi.string().allow('').optional()
 }));
 
-// Validación específica para consultas
+// ValidaciÃ³n especÃ­fica para consultas
 export const validateConsulta = validateInput(Joi.object({
   paciente_id: Joi.number().required(),
   medico_id: Joi.number().required(),
@@ -181,10 +181,10 @@ export const validateConsulta = validateInput(Joi.object({
   estado: Joi.string().valid('programada', 'en_proceso', 'completada', 'cancelada').default('programada')
 }));
 
-// Middleware de seguridad para autenticación
+// Middleware de seguridad para autenticaciÃ³n
 export const authSecurityMiddleware = [authenticateToken];
 
-// Middleware de seguridad para médicos
+// Middleware de seguridad para mÃ©dicos
 export const medicoSecurityMiddleware = [authenticateToken, requireRole(['medico', 'administrador'])];
 
 // Middleware de seguridad para administradores
@@ -196,11 +196,11 @@ export const secretariaSecurityMiddleware = [authenticateToken, requireRole(['se
 // Middleware de seguridad para finanzas
 export const finanzasSecurityMiddleware = [authenticateToken, requireRole(['finanzas', 'administrador'])];
 
-// Middleware para médicos y secretaria (acceso a pacientes/consultas)
+// Middleware para mÃ©dicos y secretaria (acceso a pacientes/consultas)
 export const medicoSecretariaMiddleware = [authenticateToken, requireRole(['medico', 'secretaria', 'administrador'])];
 
 // Middleware para roles que pueden ver reportes
 export const reportesSecurityMiddleware = [authenticateToken, requireRole(['medico', 'secretaria', 'finanzas', 'administrador'])];
 
-// Middleware específico para eliminación de médicos (solo administrador y secretaria)
+// Middleware especÃ­fico para eliminaciÃ³n de mÃ©dicos (solo administrador y secretaria)
 export const eliminarMedicoSecurityMiddleware = [authenticateToken, requireRole(['administrador', 'secretaria'])];

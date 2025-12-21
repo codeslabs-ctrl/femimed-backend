@@ -17,10 +17,10 @@ export class RemisionService {
 
   async createRemision(remisionData: CreateRemisionRequest): Promise<RemisionData> {
     try {
-      console.log('🔍 Creating remision with data:', remisionData);
-      console.log('🔍 Paciente ID type:', typeof remisionData.paciente_id, 'value:', remisionData.paciente_id);
-      console.log('🔍 Medico remitente ID:', remisionData.medico_remitente_id);
-      console.log('🔍 Medico remitido ID:', remisionData.medico_remitido_id);
+      console.log('ðŸ” Creating remision with data:', remisionData);
+      console.log('ðŸ” Paciente ID type:', typeof remisionData.paciente_id, 'value:', remisionData.paciente_id);
+      console.log('ðŸ” Medico remitente ID:', remisionData.medico_remitente_id);
+      console.log('ðŸ” Medico remitido ID:', remisionData.medico_remitido_id);
       
       // Validar datos requeridos
       if (!remisionData.paciente_id || !remisionData.medico_remitente_id || 
@@ -28,14 +28,14 @@ export class RemisionService {
         throw new Error('Missing required fields: paciente_id, medico_remitente_id, medico_remitido_id, motivo_remision');
       }
 
-      // Validar que no se remita al mismo médico
+      // Validar que no se remita al mismo mÃ©dico
       if (remisionData.medico_remitente_id === remisionData.medico_remitido_id) {
         throw new Error('Cannot refer patient to the same doctor');
       }
 
-      // Validar que el motivo no esté vacío
+      // Validar que el motivo no estÃ© vacÃ­o
       if (remisionData.motivo_remision.trim().length < 5) {
-        throw new Error('Motivo de remisión must be at least 5 characters long');
+        throw new Error('Motivo de remisiÃ³n must be at least 5 characters long');
       }
 
       const newRemisionData = {
@@ -44,7 +44,7 @@ export class RemisionService {
         fecha_remision: new Date().toISOString()
       };
 
-      // Crear la remisión en la base de datos
+      // Crear la remisiÃ³n en la base de datos
       const createdRemision = await this.remisionRepository.createRemision(newRemisionData);
 
       // Crear objeto RemisionData completo para las funciones auxiliares
@@ -54,22 +54,22 @@ export class RemisionService {
         fecha_remision: new Date().toISOString()
       };
 
-      // Crear consulta automáticamente
+      // Crear consulta automÃ¡ticamente
       try {
         await this.createConsultaFromRemision(remisionDataComplete);
-        console.log('✅ Consulta creada automáticamente desde remisión');
+        console.log('âœ… Consulta creada automÃ¡ticamente desde remisiÃ³n');
       } catch (consultaError) {
-        console.error('❌ Error creando consulta desde remisión:', consultaError);
-        // No fallar la creación de remisión si falla la consulta
+        console.error('âŒ Error creando consulta desde remisiÃ³n:', consultaError);
+        // No fallar la creaciÃ³n de remisiÃ³n si falla la consulta
       }
 
-      // Enviar email de notificación al médico remitido
+      // Enviar email de notificaciÃ³n al mÃ©dico remitido
       try {
         await this.sendRemisionNotificationEmail(remisionDataComplete);
-        console.log('✅ Email de remisión enviado exitosamente');
+        console.log('âœ… Email de remisiÃ³n enviado exitosamente');
       } catch (emailError) {
-        console.error('❌ Error enviando email de remisión:', emailError);
-        // No fallar la creación de remisión si falla el email
+        console.error('âŒ Error enviando email de remisiÃ³n:', emailError);
+        // No fallar la creaciÃ³n de remisiÃ³n si falla el email
       }
 
       return createdRemision;
@@ -207,13 +207,13 @@ export class RemisionService {
   }
 
   /**
-   * Envía email de notificación de remisión al médico remitido
+   * EnvÃ­a email de notificaciÃ³n de remisiÃ³n al mÃ©dico remitido
    */
   private async sendRemisionNotificationEmail(remision: RemisionData): Promise<void> {
     try {
-      // Validar que el paciente_id sea un número válido
+      // Validar que el paciente_id sea un nÃºmero vÃ¡lido
       if (!remision.paciente_id || isNaN(Number(remision.paciente_id))) {
-        throw new Error(`ID de paciente inválido: ${remision.paciente_id}`);
+        throw new Error(`ID de paciente invÃ¡lido: ${remision.paciente_id}`);
       }
 
       let pacienteData: any;
@@ -225,7 +225,7 @@ export class RemisionService {
       const client = await postgresPool.connect();
       try {
         // Obtener datos del paciente
-        console.log('🔍 Buscando paciente con ID:', remision.paciente_id, 'tipo:', typeof remision.paciente_id);
+        console.log('ðŸ” Buscando paciente con ID:', remision.paciente_id, 'tipo:', typeof remision.paciente_id);
         const pacienteResult = await client.query(
           'SELECT nombres, apellidos, edad, sexo FROM pacientes WHERE id = $1',
           [Number(remision.paciente_id)]
@@ -235,27 +235,27 @@ export class RemisionService {
         }
         pacienteData = pacienteResult.rows[0];
 
-        // Obtener datos del médico remitente
+        // Obtener datos del mÃ©dico remitente
         const medicoRemitenteResult = await client.query(
           'SELECT nombres, apellidos, email, especialidad_id FROM medicos WHERE id = $1',
           [remision.medico_remitente_id]
         );
         if (medicoRemitenteResult.rows.length === 0) {
-          throw new Error('Médico remitente no encontrado');
+          throw new Error('MÃ©dico remitente no encontrado');
         }
         medicoRemitenteData = medicoRemitenteResult.rows[0];
 
-        // Obtener datos del médico remitido
+        // Obtener datos del mÃ©dico remitido
         const medicoRemitidoResult = await client.query(
           'SELECT nombres, apellidos, email FROM medicos WHERE id = $1',
           [remision.medico_remitido_id]
         );
         if (medicoRemitidoResult.rows.length === 0) {
-          throw new Error('Médico remitido no encontrado');
+          throw new Error('MÃ©dico remitido no encontrado');
         }
         medicoRemitidoData = medicoRemitidoResult.rows[0];
 
-        // Obtener especialidad del médico remitente
+        // Obtener especialidad del mÃ©dico remitente
         if (medicoRemitenteData.especialidad_id) {
           const especialidadResult = await client.query(
             'SELECT nombre_especialidad FROM especialidades WHERE id = $1',
@@ -264,7 +264,7 @@ export class RemisionService {
           if (especialidadResult.rows.length > 0) {
             especialidadData = especialidadResult.rows[0];
           } else {
-            console.warn('⚠️ No se pudo obtener la especialidad del médico remitente');
+            console.warn('âš ï¸ No se pudo obtener la especialidad del mÃ©dico remitente');
           }
         }
       } finally {
@@ -307,25 +307,25 @@ export class RemisionService {
       );
 
       if (!emailSent) {
-        throw new Error('No se pudo enviar el email de notificación');
+        throw new Error('No se pudo enviar el email de notificaciÃ³n');
       }
 
-      console.log(`📧 Email de remisión enviado a: ${medicoRemitidoData.email}`);
+      console.log(`ðŸ“§ Email de remisiÃ³n enviado a: ${medicoRemitidoData.email}`);
     } catch (error) {
-      console.error('❌ Error en sendRemisionNotificationEmail:', error);
+      console.error('âŒ Error en sendRemisionNotificationEmail:', error);
       throw error;
     }
   }
 
   /**
-   * Crea una consulta automáticamente desde una remisión
+   * Crea una consulta automÃ¡ticamente desde una remisiÃ³n
    */
   private async createConsultaFromRemision(remision: RemisionData): Promise<void> {
     try {
-      console.log('🔍 Creando consulta desde remisión:', remision.id);
+      console.log('ðŸ” Creando consulta desde remisiÃ³n:', remision.id);
 
       // Obtener clinica_alias de las variables de entorno
-      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
 
       // Preparar datos de la consulta
       const consultaData = {
@@ -339,12 +339,12 @@ export class RemisionService {
         hora_pautada: '00:00:00', // Hora por defecto en lugar de NULL
         duracion_estimada: 30,
         prioridad: 'normal' as const,
-        observaciones: `Consulta generada automáticamente por remisión. ${remision.observaciones || ''}`,
+        observaciones: `Consulta generada automÃ¡ticamente por remisiÃ³n. ${remision.observaciones || ''}`,
         recordatorio_enviado: false,
         clinica_alias: clinicaAlias
       };
 
-      console.log('🔍 Datos de consulta a crear:', consultaData);
+      console.log('ðŸ” Datos de consulta a crear:', consultaData);
 
       // PostgreSQL implementation
       const client = await postgresPool.connect();
@@ -374,12 +374,12 @@ export class RemisionService {
           consultaData.clinica_alias
         ]);
 
-        console.log('✅ Consulta creada exitosamente:', result.rows[0].id);
+        console.log('âœ… Consulta creada exitosamente:', result.rows[0].id);
       } finally {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error en createConsultaFromRemision:', error);
+      console.error('âŒ Error en createConsultaFromRemision:', error);
       throw error;
     }
   }

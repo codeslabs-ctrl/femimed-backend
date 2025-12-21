@@ -1,5 +1,5 @@
 {
-  "name": "demomed-backend",
+  "name": "femimed-backend",
   "version": "1.0.0",
   "description": "Modern Node.js Express backend with PostgreSQL",
   "main": "dist/server.js",
@@ -23,7 +23,7 @@
     "api",
     "typescript"
   ],
-  "author": "DemoMed",
+  "author": "FemiMed",
   "license": "MIT",
   "dependencies": {
     "@types/bcrypt": "^6.0.0",

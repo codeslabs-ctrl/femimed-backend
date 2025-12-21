@@ -22,7 +22,7 @@ export class EspecialidadController {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error in getAllEspecialidades:', error);
+      console.error('âŒ Error in getAllEspecialidades:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: (error as Error).message }
@@ -92,12 +92,12 @@ export class EspecialidadController {
         return;
       }
 
-      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
 
       // PostgreSQL implementation
       const client = await postgresPool.connect();
       try {
-        // Iniciar transacción
+        // Iniciar transacciÃ³n
         await client.query('BEGIN');
 
         // Insertar en especialidades
@@ -118,7 +118,7 @@ export class EspecialidadController {
           [especialidadId, clinicaAlias]
         );
 
-        // Confirmar transacción
+        // Confirmar transacciÃ³n
         await client.query('COMMIT');
 
         const response: ApiResponse = {
@@ -127,13 +127,13 @@ export class EspecialidadController {
         };
         res.status(201).json(response);
       } catch (dbError: any) {
-        // Revertir transacción en caso de error
+        // Revertir transacciÃ³n en caso de error
         try {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
-          console.error('❌ Error al hacer rollback:', rollbackError);
+          console.error('âŒ Error al hacer rollback:', rollbackError);
         }
-        console.error('❌ PostgreSQL error creating especialidad:', dbError);
+        console.error('âŒ PostgreSQL error creating especialidad:', dbError);
         // Verificar si es un error de duplicado
         if (dbError.code === '23505') { // Unique violation
           const response: ApiResponse = {
@@ -143,7 +143,7 @@ export class EspecialidadController {
           res.status(400).json(response);
           return;
         }
-        // Error genérico para el usuario
+        // Error genÃ©rico para el usuario
         const response: ApiResponse = {
           success: false,
           error: { message: 'No se pudo crear la especialidad. Por favor, verifique los datos e intente nuevamente.' }
@@ -153,7 +153,7 @@ export class EspecialidadController {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error creating especialidad:', error);
+      console.error('âŒ Error creating especialidad:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: 'No se pudo crear la especialidad. Por favor, verifique los datos e intente nuevamente.' }
@@ -193,7 +193,7 @@ export class EspecialidadController {
       // PostgreSQL implementation
       const client = await postgresPool.connect();
       try {
-        // Construir query dinámico
+        // Construir query dinÃ¡mico
         const setClauses: string[] = [];
         const values: any[] = [];
         let paramIndex = 1;
@@ -237,7 +237,7 @@ export class EspecialidadController {
         };
         res.json(response);
       } catch (dbError: any) {
-        console.error('❌ PostgreSQL error updating especialidad:', dbError);
+        console.error('âŒ PostgreSQL error updating especialidad:', dbError);
         if (dbError.code === '23505') { // Unique violation
           const response: ApiResponse = {
             success: false,
@@ -246,7 +246,7 @@ export class EspecialidadController {
           res.status(400).json(response);
           return;
         }
-        // Error genérico para el usuario
+        // Error genÃ©rico para el usuario
         const response: ApiResponse = {
           success: false,
           error: { message: 'No se pudo actualizar la especialidad. Por favor, verifique los datos e intente nuevamente.' }
@@ -256,7 +256,7 @@ export class EspecialidadController {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error updating especialidad:', error);
+      console.error('âŒ Error updating especialidad:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: 'No se pudo actualizar la especialidad. Por favor, verifique los datos e intente nuevamente.' }
@@ -282,7 +282,7 @@ export class EspecialidadController {
       // PostgreSQL implementation
       const client = await postgresPool.connect();
       try {
-        await client.query('BEGIN'); // Iniciar transacción
+        await client.query('BEGIN'); // Iniciar transacciÃ³n
 
         // Verificar que la especialidad existe
         const especialidadCheck = await client.query(
@@ -302,18 +302,18 @@ export class EspecialidadController {
 
         const especialidad = especialidadCheck.rows[0];
 
-        // Verificar si la especialidad ya está inactiva
+        // Verificar si la especialidad ya estÃ¡ inactiva
         if (!especialidad.activa) {
           await client.query('ROLLBACK');
           const response: ApiResponse = {
             success: false,
-            error: { message: 'La especialidad ya está inactiva' }
+            error: { message: 'La especialidad ya estÃ¡ inactiva' }
           };
           res.status(400).json(response);
           return;
         }
 
-        // Verificar si la especialidad está siendo usada por médicos ACTIVOS
+        // Verificar si la especialidad estÃ¡ siendo usada por mÃ©dicos ACTIVOS
         const checkMedicosActivos = await client.query(
           'SELECT COUNT(*) as count FROM medicos WHERE especialidad_id = $1 AND activo = true',
           [especialidadId]
@@ -321,7 +321,7 @@ export class EspecialidadController {
 
         const tieneMedicosActivos = parseInt(checkMedicosActivos.rows[0].count) > 0;
 
-        // Verificar si hay consultas FINALIZADAS con médicos de esta especialidad
+        // Verificar si hay consultas FINALIZADAS con mÃ©dicos de esta especialidad
         const checkConsultas = await client.query(
           `SELECT COUNT(*) as count 
            FROM consultas_pacientes cp
@@ -340,15 +340,15 @@ export class EspecialidadController {
             [especialidadId]
           );
 
-          await client.query('COMMIT'); // Confirmar transacción
+          await client.query('COMMIT'); // Confirmar transacciÃ³n
 
           let razon = '';
           if (tieneMedicosActivos && tieneConsultasFinalizadas) {
-            razon = 'está asociada a médicos activos y tiene consultas finalizadas';
+            razon = 'estÃ¡ asociada a mÃ©dicos activos y tiene consultas finalizadas';
           } else if (tieneMedicosActivos) {
-            razon = 'está asociada a uno o más médicos activos';
+            razon = 'estÃ¡ asociada a uno o mÃ¡s mÃ©dicos activos';
           } else {
-            razon = 'tiene consultas finalizadas asociadas a médicos de esta especialidad';
+            razon = 'tiene consultas finalizadas asociadas a mÃ©dicos de esta especialidad';
           }
 
           const response: ApiResponse = {
@@ -362,9 +362,9 @@ export class EspecialidadController {
           return;
         }
 
-        // Si llegamos aquí, se puede eliminar físicamente
+        // Si llegamos aquÃ­, se puede eliminar fÃ­sicamente
         // Eliminar de especialidades_clinicas primero
-        const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
+        const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
         await client.query(
           'DELETE FROM especialidades_clinicas WHERE especialidad_id = $1 AND clinica_alias = $2',
           [especialidadId, clinicaAlias]
@@ -386,7 +386,7 @@ export class EspecialidadController {
           return;
         }
 
-        await client.query('COMMIT'); // Confirmar transacción
+        await client.query('COMMIT'); // Confirmar transacciÃ³n
 
         const response: ApiResponse = {
           success: true,
@@ -400,19 +400,19 @@ export class EspecialidadController {
         try {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
-          console.error('❌ Error al hacer rollback:', rollbackError);
+          console.error('âŒ Error al hacer rollback:', rollbackError);
         }
-        console.error('❌ PostgreSQL error deleting especialidad:', dbError);
+        console.error('âŒ PostgreSQL error deleting especialidad:', dbError);
         // Verificar si es un error de foreign key constraint
         if (dbError.code === '23503') { // Foreign key violation
           const response: ApiResponse = {
             success: false,
-            error: { message: 'No se puede eliminar la especialidad porque está siendo usada en el sistema' }
+            error: { message: 'No se puede eliminar la especialidad porque estÃ¡ siendo usada en el sistema' }
           };
           res.status(400).json(response);
           return;
         }
-        // Error genérico para el usuario
+        // Error genÃ©rico para el usuario
         const response: ApiResponse = {
           success: false,
           error: { message: 'No se pudo eliminar la especialidad. Por favor, intente nuevamente.' }
@@ -422,7 +422,7 @@ export class EspecialidadController {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error deleting especialidad:', error);
+      console.error('âŒ Error deleting especialidad:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: 'No se pudo eliminar la especialidad. Por favor, intente nuevamente.' }
@@ -464,7 +464,7 @@ export class EspecialidadController {
         client.release();
       }
     } catch (error) {
-      console.error('❌ Error searching especialidades:', error);
+      console.error('âŒ Error searching especialidades:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: (error as Error).message }

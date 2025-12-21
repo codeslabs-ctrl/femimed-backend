@@ -14,10 +14,10 @@ const configFile = nodeEnv === 'production'
 // Load environment variables
 const dotenvResult = dotenv.config({ path: configFile });
 if (dotenvResult.error) {
-  console.error(`❌ Error loading config file: ${configFile}`);
+  console.error(`âŒ Error loading config file: ${configFile}`);
   console.error(`   Error: ${dotenvResult.error.message}`);
 } else {
-  console.log(`📋 Loading config from: ${configFile} (NODE_ENV: ${nodeEnv})`);
+  console.log(`ðŸ“‹ Loading config from: ${configFile} (NODE_ENV: ${nodeEnv})`);
   console.log(`   File exists: ${dotenvResult.parsed ? 'Yes' : 'No'}`);
 }
 
@@ -56,14 +56,14 @@ export const config: Config = {
     user: process.env['EMAIL_USER'] || '',
     password: process.env['EMAIL_PASSWORD'] || '',
     service: process.env['EMAIL_SERVICE'] || 'gmail',
-    from: process.env['EMAIL_FROM'] || 'DemoMed <codes.labs.rc@gmail.com>'
+    from: process.env['EMAIL_FROM'] || 'FemiMed <codes.labs.rc@gmail.com>'
   },
   
   // System configuration
   sistema: {
-    nombre: process.env['SISTEMA_NOMBRE'] || 'Sistema de Gestión Médica',
-    clinicaNombre: process.env['CLINICA_NOMBRE'] || 'DemoMed',
-    clinicaAlias: process.env['CLINICA_ALIAS'] || 'demomed'
+    nombre: process.env['SISTEMA_NOMBRE'] || 'Sistema de GestiÃ³n MÃ©dica',
+    clinicaNombre: process.env['CLINICA_NOMBRE'] || 'FemiMed',
+    clinicaAlias: process.env['CLINICA_ALIAS'] || 'FemiMed'
   }
 };
 
@@ -71,7 +71,7 @@ export const config: Config = {
 const requiredPostgresVars: string[] = ['POSTGRES_HOST', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD'];
 for (const envVar of requiredPostgresVars) {
   if (!process.env[envVar]) {
-    console.error(`❌ Missing environment variable: ${envVar}`);
+    console.error(`âŒ Missing environment variable: ${envVar}`);
     console.error(`   Current working directory: ${process.cwd()}`);
     console.error(`   Config file path: ${configFile}`);
     console.error(`   Available env vars starting with POSTGRES:`, 
