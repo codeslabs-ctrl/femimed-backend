@@ -21,6 +21,7 @@ import finanzasRoutes from './finanzas.js';
 import firmasRoutes from './firmas.js';
 import importacionRoutes from './importacion.js';
 import plantillaHistoriaRoutes from './plantilla-historia.js';
+import usersRoutes from './users.js';
 import { ApiResponse } from '../types/index.js';
 import { config } from '../config/environment.js';
 
@@ -103,5 +104,6 @@ router.use('/finanzas', finanzasRoutes);
 router.use('/firmas', firmasRoutes);
 router.use('/importacion', importacionRoutes);
 router.use('/plantillas-historias', plantillaHistoriaRoutes);
+router.use('/users', usersRoutes);
 
 export default router;

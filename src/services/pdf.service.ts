@@ -559,37 +559,50 @@ export class PDFService {
         return '';
       }
 
-      // Si la ruta es relativa (empieza con ./), resolverla desde el directorio del proyecto
-      // El código compilado está en dist/, así que subimos 2 niveles para llegar a la raíz
-      let logoFile: string;
-      if (logoPath.startsWith('./') || logoPath.startsWith('../')) {
-        // Resolver desde el directorio del proyecto (raíz del backend)
-        const projectRoot = path.join(__dirname, '..', '..');
-        logoFile = path.resolve(projectRoot, logoPath);
-      } else if (path.isAbsolute(logoPath)) {
-        // Si es absoluta, usarla tal cual
-        logoFile = logoPath;
-      } else {
-        // Si es relativa sin ./ o ../, también resolverla desde el proyecto
-        const projectRoot = path.join(__dirname, '..', '..');
-        logoFile = path.resolve(projectRoot, logoPath);
+      // Resolver rutas relativas desde la raíz del backend.
+      // En runtime compilado, __dirname apunta a dist/, por eso subimos 2 niveles.
+      const projectRoot = path.join(__dirname, '..', '..');
+
+      const resolveFromRoot = (p: string): string => {
+        if (path.isAbsolute(p)) return p;
+        return path.resolve(projectRoot, p);
+      };
+
+      // Candidatos (fallback): primero assets/, luego dist/assets/ (útil si en servidor solo existe dist/assets)
+      const candidates: string[] = [];
+
+      const primary = resolveFromRoot(logoPath);
+      candidates.push(primary);
+
+      if (!path.isAbsolute(logoPath)) {
+        // Si el logoPath apunta a ./assets/..., intentar también ./dist/assets/...
+        const normalized = logoPath.replace(/\\/g, '/');
+        if (normalized.startsWith('./assets/')) {
+          candidates.push(resolveFromRoot(normalized.replace('./assets/', './dist/assets/')));
+        } else if (normalized.startsWith('assets/')) {
+          candidates.push(resolveFromRoot(normalized.replace('assets/', 'dist/assets/')));
+        }
       }
-      
-      console.log('🔍 Buscando logo en:', logoFile);
-      
-      if (fs.existsSync(logoFile)) {
-        const logoBuffer = fs.readFileSync(logoFile);
+
+      for (const candidate of candidates) {
+        console.log('🔍 Buscando logo en:', candidate);
+        if (!fs.existsSync(candidate)) continue;
+
+        const logoBuffer = fs.readFileSync(candidate);
         const base64 = logoBuffer.toString('base64');
-        const mimeType = logoPath.endsWith('.svg') ? 'image/svg+xml' : 
-                        logoPath.endsWith('.webp') ? 'image/webp' : 
-                        logoPath.endsWith('.jpg') || logoPath.endsWith('.jpeg') ? 'image/jpeg' :
-                        'image/png';
+        const ext = path.extname(candidate).toLowerCase();
+        const mimeType =
+          ext === '.svg' ? 'image/svg+xml' :
+          ext === '.webp' ? 'image/webp' :
+          ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+          'image/png';
+
         console.log('✅ Logo cargado correctamente, tipo:', mimeType);
         return `data:${mimeType};base64,${base64}`;
-      } else {
-        console.warn('⚠️ Logo no encontrado en:', logoFile);
-        console.warn('⚠️ Continuando sin logo');
       }
+
+      console.warn('⚠️ Logo no encontrado. Se intentó:', candidates);
+      console.warn('⚠️ Continuando sin logo');
     } catch (error: any) {
       console.warn('⚠️ Error leyendo logo (continuando sin logo):', error.message);
     }

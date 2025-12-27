@@ -17,12 +17,29 @@ declare global {
 export const securityHeaders = helmet();
 
 // CORS configurado para FemiMed
-const allowedOrigins = [
-  process.env['FRONTEND_URL'] || 'http://localhost:4200',
-  'https://FemiMed.codes-labs.com',
-  'https://www.FemiMed.codes-labs.com',
-  'http://localhost:4200' // Desarrollo
-].filter(Boolean); // Elimina valores undefined/null
+// - Acepta una lista separada por comas en CORS_ORIGIN (recomendado para producción)
+// - Incluye FRONTEND_URL como fallback
+// - Normaliza (lowercase + sin trailing slash) para evitar problemas por mayúsculas/minúsculas o "/"
+const normalizeOrigin = (value: string): string =>
+  value.trim().toLowerCase().replace(/\/$/, '');
+
+const envOriginsRaw = [
+  process.env['CORS_ORIGIN'],
+  process.env['FRONTEND_URL']
+].filter(Boolean) as string[];
+
+const envOrigins = envOriginsRaw
+  .flatMap(v => v.split(','))
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const allowedOrigins = Array.from(new Set([
+  ...envOrigins,
+  // FallBacks / compat
+  'https://femimed.codes-labs.com',
+  'https://www.femimed.codes-labs.com',
+  'http://localhost:4200'
+].map(normalizeOrigin)));
 
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
@@ -32,7 +49,8 @@ export const corsMiddleware = cors({
     }
     
     // Verificar si el origen estÃ¡ permitido
-    if (allowedOrigins.includes(origin)) {
+    const normalized = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalized)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
