@@ -22,6 +22,7 @@ import firmasRoutes from './firmas.js';
 import importacionRoutes from './importacion.js';
 import plantillaHistoriaRoutes from './plantilla-historia.js';
 import usersRoutes from './users.js';
+import externalV1Routes from './external/v1/index.js';
 import { ApiResponse } from '../types/index.js';
 import { config } from '../config/environment.js';
 
@@ -105,5 +106,6 @@ router.use('/firmas', firmasRoutes);
 router.use('/importacion', importacionRoutes);
 router.use('/plantillas-historias', plantillaHistoriaRoutes);
 router.use('/users', usersRoutes);
+router.use('/external/v1', externalV1Routes);
 
 export default router;
