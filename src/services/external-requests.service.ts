@@ -1,4 +1,5 @@
 import { postgresPool } from '../config/database.js';
+import { PDFService } from './pdf.service';
 
 export type AppointmentRequestInput = {
   paciente_id: number;
@@ -266,6 +267,31 @@ export class ExternalRequestsService {
       });
 
       return items;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async generateReportPdfForPaciente(pacienteId: number, informeId: number): Promise<{ pdf: Buffer; numero_informe: string | number | null }> {
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(
+        `SELECT id, paciente_id, numero_informe
+         FROM informes_medicos
+         WHERE id = $1
+           AND paciente_id = $2
+           AND estado IN ('finalizado','firmado','enviado')
+         LIMIT 1`,
+        [informeId, pacienteId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Informe no encontrado para el paciente');
+      }
+
+      const pdfService = new PDFService();
+      const pdf = await pdfService.generarPDFInforme(informeId);
+      return { pdf, numero_informe: result.rows[0].numero_informe ?? null };
     } finally {
       client.release();
     }

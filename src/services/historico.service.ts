@@ -25,6 +25,65 @@ export interface HistoricoWithDetails extends HistoricoData {
 }
 
 export class HistoricoService {
+  async getHistoricoById(historicoId: number): Promise<HistoricoWithDetails> {
+    if (!historicoId || historicoId <= 0) throw new Error('Valid historico ID is required');
+
+    const client = await postgresPool.connect();
+    try {
+      const query = `
+        SELECT 
+          h.id,
+          h.paciente_id,
+          h.medico_id,
+          h.motivo_consulta,
+          h.diagnostico,
+          h.conclusiones,
+          h.plan,
+          h.fecha_consulta,
+          h.fecha_creacion,
+          h.fecha_actualizacion,
+          h.ruta_archivo,
+          h.nombre_archivo,
+          p.nombres as paciente_nombre,
+          p.apellidos as paciente_apellidos,
+          m.nombres as medico_nombre,
+          m.apellidos as medico_apellidos,
+          e.nombre_especialidad as especialidad_nombre
+        FROM historico_pacientes h
+        LEFT JOIN pacientes p ON h.paciente_id = p.id
+        LEFT JOIN medicos m ON h.medico_id = m.id
+        LEFT JOIN especialidades e ON m.especialidad_id = e.id
+        WHERE h.id = $1
+        LIMIT 1
+      `;
+
+      const result = await client.query(query, [historicoId]);
+      if (result.rows.length === 0) throw new Error('Historia médica no encontrada');
+
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        paciente_id: row.paciente_id,
+        medico_id: row.medico_id,
+        motivo_consulta: row.motivo_consulta,
+        diagnostico: row.diagnostico,
+        conclusiones: row.conclusiones,
+        plan: row.plan,
+        fecha_consulta: row.fecha_consulta,
+        fecha_creacion: row.fecha_creacion,
+        fecha_actualizacion: row.fecha_actualizacion,
+        ruta_archivo: row.ruta_archivo,
+        nombre_archivo: row.nombre_archivo,
+        paciente_nombre: row.paciente_nombre,
+        paciente_apellidos: row.paciente_apellidos,
+        medico_nombre: row.medico_nombre,
+        medico_apellidos: row.medico_apellidos,
+        especialidad_nombre: row.especialidad_nombre
+      };
+    } finally {
+      client.release();
+    }
+  }
   async getHistoricoByPaciente(pacienteId: number): Promise<HistoricoWithDetails[]> {
     try {
       if (!pacienteId || pacienteId <= 0) {
@@ -825,9 +884,11 @@ export class HistoricoService {
         throw new Error('paciente_id and motivo_consulta are required');
       }
 
-      // Obtener el medico_id del usuario autenticado (esto debería venir del token JWT)
-      // Por ahora, usaremos un valor por defecto o lo pasaremos desde el frontend
-      const medicoId = historicoData.medico_id || 1; // TODO: Obtener del token JWT
+      // medico_id es requerido (se fuerza desde el controller usando el token JWT)
+      const medicoId = Number(historicoData.medico_id || 0);
+      if (!medicoId) {
+        throw new Error('medico_id is required');
+      }
 
       // PostgreSQL implementation
       const client = await postgresPool.connect();

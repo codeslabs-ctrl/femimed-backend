@@ -63,6 +63,38 @@ router.get('/', async (req: Request, res: Response<ApiResponse>) => {
   }
 });
 
+// GET /api/v1/external/v1/reports/pdf?paciente_id=123&informe_id=456
+// Descarga PDF de un informe emitido (solo si pertenece al paciente).
+router.get('/pdf', async (req: Request, res: Response) => {
+  try {
+    const pacienteId = Number((req.query as any)?.paciente_id);
+    const informeId = Number((req.query as any)?.informe_id);
+
+    if (!pacienteId || pacienteId <= 0 || Number.isNaN(pacienteId)) {
+      res.status(400).json({ success: false, error: { message: 'paciente_id es requerido (query)' } });
+      return;
+    }
+    if (!informeId || informeId <= 0 || Number.isNaN(informeId)) {
+      res.status(400).json({ success: false, error: { message: 'informe_id es requerido (query)' } });
+      return;
+    }
+
+    const { pdf, numero_informe } = await ExternalRequestsService.generateReportPdfForPaciente(pacienteId, informeId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="informe-${numero_informe ?? informeId}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    res.status(200).send(pdf);
+  } catch (error) {
+    const msg = (error as Error).message || 'Error generando el PDF del informe';
+    res.status(404).json({ success: false, error: { message: msg } });
+  }
+});
+
 export default router;
 
 

@@ -224,10 +224,25 @@ export class HistoricoController {
 
   async createHistorico(req: Request, res: Response<ApiResponse>): Promise<void> {
     try {
-      const historicoData = req.body;
-      console.log('🔍 Backend - Creando historial médico:', historicoData);
+      const historicoData = req.body || {};
+      const user = (req as any).user;
+      const medicoId = Number(user?.medico_id || 0);
+      if (!medicoId) {
+        res.status(403).json({ success: false, error: { message: 'No se pudo identificar el médico autenticado' } });
+        return;
+      }
 
-      const historico = await this.historicoService.createHistorico(historicoData);
+      // Enforce ownership: el médico autenticado es quien crea el control.
+      const payload = {
+        ...historicoData,
+        medico_id: medicoId,
+        // si no viene fecha_consulta, usar ahora
+        ...(historicoData.fecha_consulta ? null : { fecha_consulta: new Date().toISOString() })
+      };
+
+      console.log('🔍 Backend - Creando historial médico:', payload);
+
+      const historico = await this.historicoService.createHistorico(payload);
 
       const response: ApiResponse = {
         success: true,
@@ -241,6 +256,21 @@ export class HistoricoController {
         error: { message: (error as Error).message }
       };
       res.status(400).json(response);
+    }
+  }
+
+  async getHistoricoById(req: Request, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const historicoId = parseInt((req.params as any).id);
+      if (!historicoId || Number.isNaN(historicoId)) {
+        res.status(400).json({ success: false, error: { message: 'ID de historia médica inválido' } });
+        return;
+      }
+
+      const historico = await this.historicoService.getHistoricoById(historicoId);
+      res.json({ success: true, data: historico });
+    } catch (error) {
+      res.status(404).json({ success: false, error: { message: (error as Error).message } });
     }
   }
 
@@ -291,9 +321,9 @@ export class HistoricoController {
     }
   }
 
-  async updateHistorico(req: Request<{ id: string }, ApiResponse>, res: Response<ApiResponse>): Promise<void> {
+  async updateHistorico(req: Request, res: Response<ApiResponse>): Promise<void> {
     try {
-      const { id } = req.params;
+      const { id } = req.params as any;
       const updateData = req.body;
 
       console.log('🔍 HistoricoController.updateHistorico - ID:', id);
@@ -316,6 +346,20 @@ export class HistoricoController {
           error: { message: 'No se proporcionaron datos para actualizar' }
         };
         res.status(400).json(response);
+        return;
+      }
+
+      // Enforce ownership: solo el médico dueño del control puede editar.
+      const user = (req as any).user;
+      const medicoId = Number(user?.medico_id || 0);
+      if (!medicoId) {
+        res.status(403).json({ success: false, error: { message: 'No se pudo identificar el médico autenticado' } });
+        return;
+      }
+
+      const existing = await this.historicoService.getHistoricoById(historicoId);
+      if (Number(existing.medico_id) !== medicoId) {
+        res.status(403).json({ success: false, error: { message: 'Solo puede editar controles creados por usted' } });
         return;
       }
 
