@@ -563,7 +563,7 @@ export class ConsultaController {
           success: false,
           error: { 
             message: 'Error al obtener consultas pendientes',
-            details: process.env.NODE_ENV === 'development' ? dbError?.message : undefined
+            details: process.env['NODE_ENV'] === 'development' ? dbError?.message : undefined
           }
         } as ApiResponse<null>);
       } finally {
@@ -576,7 +576,7 @@ export class ConsultaController {
         success: false,
         error: { 
           message: 'Error interno del servidor',
-          details: process.env.NODE_ENV === 'development' ? error?.message : undefined
+          details: process.env['NODE_ENV'] === 'development' ? error?.message : undefined
         }
       } as ApiResponse<null>);
     }
