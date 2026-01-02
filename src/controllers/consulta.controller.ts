@@ -505,7 +505,11 @@ export class ConsultaController {
           INNER JOIN pacientes p ON c.paciente_id = p.id
           INNER JOIN medicos m ON c.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
-          LEFT JOIN historico_pacientes h ON h.consulta_id = c.id
+          LEFT JOIN historico_pacientes h ON (
+            h.paciente_id = c.paciente_id 
+            AND h.medico_id = c.medico_id 
+            AND h.fecha_consulta = c.fecha_pautada
+          )
           WHERE c.fecha_pautada < $1
             AND c.estado_consulta IN ('agendada', 'reagendada', 'en_progreso')
             AND h.id IS NULL
@@ -546,21 +550,34 @@ export class ConsultaController {
           success: true,
           data: consultasProcesadas
         } as ApiResponse<typeof consultasProcesadas>);
-      } catch (dbError) {
+      } catch (dbError: any) {
         console.error('❌ PostgreSQL error fetching consultas pendientes:', dbError);
+        console.error('❌ Error details:', {
+          message: dbError?.message,
+          code: dbError?.code,
+          detail: dbError?.detail,
+          hint: dbError?.hint,
+          position: dbError?.position
+        });
         res.status(500).json({
           success: false,
-          error: { message: 'Error al obtener consultas pendientes' }
+          error: { 
+            message: 'Error al obtener consultas pendientes',
+            details: process.env.NODE_ENV === 'development' ? dbError?.message : undefined
+          }
         } as ApiResponse<null>);
       } finally {
         client.release();
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error in getConsultasPendientes:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Error interno del servidor' }
+        error: { 
+          message: 'Error interno del servidor',
+          details: process.env.NODE_ENV === 'development' ? error?.message : undefined
+        }
       } as ApiResponse<null>);
     }
   }
