@@ -460,21 +460,92 @@ export class ConsultaController {
     }
   }
 
-  // Obtener consultas pendientes
-  static async getConsultasPendientes(_req: Request, res: Response): Promise<void> {
+  // Obtener consultas pendientes (consultas pasadas sin historia médica registrada)
+  static async getConsultasPendientes(req: Request, res: Response): Promise<void> {
     try {
+      // Obtener información del usuario autenticado
+      const user = (req as any).user;
+      
+      if (!user) {
+        res.status(401).json({
+          success: false,
+          error: { message: 'Usuario no autenticado' }
+        } as ApiResponse<null>);
+        return;
+      }
+
+      // Obtener fecha actual en zona horaria de Venezuela (GMT-4)
+      const now = new Date();
+      const fechaHoyVenezuela = now.toLocaleDateString('en-CA', { 
+        timeZone: 'America/Caracas' 
+      }); // Formato YYYY-MM-DD
+      
+      console.log('🔍 getConsultasPendientes - Fecha filtro (Venezuela):', fechaHoyVenezuela);
+      console.log('🔍 getConsultasPendientes - Usuario:', {
+        userId: user?.userId,
+        rol: user?.rol,
+        medico_id: user?.medico_id
+      });
+
       const client = await postgresPool.connect();
       try {
-        const result = await client.query(
-          `SELECT * FROM vista_consultas_completa 
-           WHERE estado_consulta IN ('agendada', 'reagendada', 'por_agendar')
-           ORDER BY fecha_pautada ASC, hora_pautada ASC`
-        );
+        // Construir la query SQL
+        let sqlQuery = `
+          SELECT c.*, 
+                 p.nombres as paciente_nombre, 
+                 p.apellidos as paciente_apellidos,
+                 p.telefono as paciente_telefono, 
+                 p.cedula as paciente_cedula,
+                 m.nombres as medico_nombre, 
+                 m.apellidos as medico_apellidos,
+                 m.especialidad_id,
+                 e.nombre_especialidad as especialidad_nombre,
+                 e.descripcion as especialidad_descripcion
+          FROM consultas_pacientes c
+          INNER JOIN pacientes p ON c.paciente_id = p.id
+          INNER JOIN medicos m ON c.medico_id = m.id
+          LEFT JOIN especialidades e ON m.especialidad_id = e.id
+          LEFT JOIN historico_pacientes h ON h.consulta_id = c.id
+          WHERE c.fecha_pautada < $1
+            AND c.estado_consulta IN ('agendada', 'reagendada', 'en_progreso')
+            AND h.id IS NULL
+        `;
+        const params: any[] = [fechaHoyVenezuela];
+
+        // Si el usuario es médico, filtrar solo sus consultas
+        if (user.rol === 'medico' && user.medico_id) {
+          console.log('🔍 Filtrando consultas pendientes por médico_id:', user.medico_id);
+          sqlQuery += ' AND c.medico_id = $2';
+          params.push(user.medico_id);
+        } else {
+          console.log('🔍 Mostrando todas las consultas pendientes (administrador o sin médico_id)');
+        }
+
+        sqlQuery += ' ORDER BY c.fecha_pautada DESC, c.hora_pautada DESC LIMIT 20';
+
+        const result = await client.query(sqlQuery, params);
+        const consultas = result.rows;
+        
+        // Procesar datos
+        const consultasProcesadas = consultas.map(consulta => ({
+          ...consulta,
+          paciente_nombre: consulta.paciente_nombre || '',
+          paciente_apellidos: consulta.paciente_apellidos || '',
+          paciente_telefono: consulta.paciente_telefono || '',
+          paciente_cedula: consulta.paciente_cedula || '',
+          medico_nombre: consulta.medico_nombre || '',
+          medico_apellidos: consulta.medico_apellidos || '',
+          especialidad_id: consulta.especialidad_id || null,
+          especialidad_nombre: consulta.especialidad_nombre || '',
+          especialidad_descripcion: consulta.especialidad_descripcion || ''
+        }));
+
+        console.log('🔍 Consultas pendientes encontradas:', consultasProcesadas?.length || 0);
 
         res.json({
           success: true,
-          data: result.rows
-        } as ApiResponse<typeof result.rows>);
+          data: consultasProcesadas
+        } as ApiResponse<typeof consultasProcesadas>);
       } catch (dbError) {
         console.error('❌ PostgreSQL error fetching consultas pendientes:', dbError);
         res.status(500).json({
