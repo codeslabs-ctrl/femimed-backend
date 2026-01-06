@@ -100,7 +100,12 @@ export class MensajeController {
   // Crear mensaje
   static async crearMensaje(req: Request, res: Response): Promise<void> {
     try {
-      const { titulo, contenido, tipo_mensaje, fecha_programado, destinatarios } = req.body;
+      const { titulo, contenido, tipo_mensaje, fecha_programado, destinatarios, canal } = req.body;
+
+      console.log('=== BACKEND: Recibiendo datos ===');
+      console.log('Canal recibido:', canal);
+      console.log('Tipo de canal:', typeof canal, Array.isArray(canal));
+      console.log('Body completo:', JSON.stringify(req.body, null, 2));
 
       if (!titulo || !contenido || !destinatarios || !Array.isArray(destinatarios)) {
         res.status(400).json({
@@ -110,17 +115,44 @@ export class MensajeController {
         return;
       }
 
+      // Validar y normalizar canal (puede ser string o array)
+      let canalesValidos: string[] = [];
+      if (Array.isArray(canal)) {
+        canalesValidos = canal.filter(c => ['email', 'whatsapp', 'sms'].includes(c));
+        console.log('Canal es array, canales válidos:', canalesValidos);
+      } else if (typeof canal === 'string') {
+        canalesValidos = ['email', 'whatsapp', 'sms'].includes(canal) ? [canal] : ['email'];
+        console.log('Canal es string, canales válidos:', canalesValidos);
+      } else {
+        canalesValidos = ['email'];
+        console.log('Canal no válido, usando default email');
+      }
+
+      if (canalesValidos.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: { message: 'Debe seleccionar al menos un canal válido: email, whatsapp o sms' }
+        });
+        return;
+      }
+
+      console.log('Canales finales a guardar:', canalesValidos);
+
       const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
       const client = await postgresPool.connect();
       try {
         await client.query('BEGIN');
 
+        // Guardar canal como array JSON o string según la estructura de la BD
+        // Si la BD soporta arrays, usar array, sino convertir a JSON string
+        const canalParaBD = canalesValidos.length === 1 ? canalesValidos[0] : JSON.stringify(canalesValidos);
+
         // Crear el mensaje
         const mensajeResult = await client.query(
           `INSERT INTO mensajes_difusion (
             titulo, contenido, tipo_mensaje, estado, fecha_programado,
-            creado_por, total_destinatarios, clinica_alias
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            creado_por, total_destinatarios, clinica_alias, canal
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           RETURNING *`,
           [
             titulo,
@@ -130,15 +162,16 @@ export class MensajeController {
             fecha_programado || null,
             1, // TODO: Obtener del token JWT
             destinatarios.length,
-            clinicaAlias
+            clinicaAlias,
+            canalParaBD
           ]
         );
 
         const mensaje = mensajeResult.rows[0];
 
-        // Obtener emails de los pacientes seleccionados
+        // Obtener emails y teléfonos de los pacientes seleccionados
         const pacientesResult = await client.query(
-          'SELECT id, email FROM pacientes WHERE id = ANY($1::int[])',
+          'SELECT id, email, telefono FROM pacientes WHERE id = ANY($1::int[])',
           [destinatarios]
         );
 
@@ -151,23 +184,73 @@ export class MensajeController {
           return;
         }
 
-        // Crear destinatarios
+        // Crear destinatarios - filtrar según los canales seleccionados
+        const tieneEmail = canalesValidos.includes('email');
+        const tieneTelefono = canalesValidos.includes('whatsapp') || canalesValidos.includes('sms');
+        
         const destinatariosData = pacientesResult.rows
-          .filter((paciente: any) => paciente.id && paciente.email)
+          .filter((paciente: any) => {
+            // Si solo hay email, debe tener email
+            if (tieneEmail && !tieneTelefono) {
+              return paciente.id && paciente.email;
+            }
+            // Si solo hay whatsapp/sms, debe tener telefono
+            if (!tieneEmail && tieneTelefono) {
+              return paciente.id && paciente.telefono;
+            }
+            // Si hay ambos, debe tener al menos uno
+            if (tieneEmail && tieneTelefono) {
+              return paciente.id && (paciente.email || paciente.telefono);
+            }
+            return paciente.id;
+          })
           .map((paciente: any) => ({
             mensaje_id: mensaje.id,
             paciente_id: paciente.id,
-            email: paciente.email,
-            estado_envio: 'pendiente'
+            email: paciente.email || null,
+            telefono: paciente.telefono || null,
+            estado_envio: 'pendiente',
+            // Guardar el primer canal o todos los canales como JSON si hay múltiples
+            canal: canalesValidos.length === 1 ? canalesValidos[0] : JSON.stringify(canalesValidos)
           }));
 
+        // Crear un registro por cada combinación de destinatario y canal
         for (const dest of destinatariosData) {
-          await client.query(
-            `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, estado_envio)
-             VALUES ($1, $2, $3, $4)`,
-            [dest.mensaje_id, dest.paciente_id, dest.email, dest.estado_envio]
-          );
+          // Si hay múltiples canales, crear un registro por cada canal
+          if (canalesValidos.length > 1) {
+            for (const canalIndividual of canalesValidos) {
+              // Validar que el paciente tenga el dato necesario para este canal
+              if (canalIndividual === 'email' && !dest.email) continue;
+              if ((canalIndividual === 'whatsapp' || canalIndividual === 'sms') && !dest.telefono) continue;
+              
+              await client.query(
+                `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, telefono, estado_envio, canal)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT DO NOTHING`,
+                [dest.mensaje_id, dest.paciente_id, dest.email, dest.telefono, dest.estado_envio, canalIndividual]
+              );
+            }
+          } else {
+            // Un solo canal
+            await client.query(
+              `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, telefono, estado_envio, canal)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [dest.mensaje_id, dest.paciente_id, dest.email, dest.telefono, dest.estado_envio, canalesValidos[0]]
+            );
+          }
         }
+
+        // Actualizar total_destinatarios con el número real de registros creados
+        const countResult = await client.query(
+          'SELECT COUNT(*) as count FROM mensajes_destinatarios WHERE mensaje_id = $1',
+          [mensaje.id]
+        );
+        const totalDestinatarios = parseInt(countResult.rows[0].count);
+        
+        await client.query(
+          'UPDATE mensajes_difusion SET total_destinatarios = $1 WHERE id = $2',
+          [totalDestinatarios, mensaje.id]
+        );
 
         await client.query('COMMIT');
 
@@ -205,24 +288,87 @@ export class MensajeController {
         });
         return;
       }
-      const { titulo, contenido, tipo_mensaje, fecha_programado } = req.body;
+      const { titulo, contenido, tipo_mensaje, fecha_programado, canal } = req.body;
+
+      // Validar y normalizar canal si se proporciona (puede ser string o array)
+      let canalesValidos: string[] | undefined = undefined;
+      if (canal !== undefined) {
+        if (Array.isArray(canal)) {
+          canalesValidos = canal.filter(c => ['email', 'whatsapp', 'sms'].includes(c));
+          if (canalesValidos.length === 0) {
+            res.status(400).json({
+              success: false,
+              error: { message: 'Debe seleccionar al menos un canal válido: email, whatsapp o sms' }
+            });
+            return;
+          }
+        } else if (typeof canal === 'string') {
+          if (!['email', 'whatsapp', 'sms'].includes(canal)) {
+            res.status(400).json({
+              success: false,
+              error: { message: 'Canal inválido. Debe ser: email, whatsapp o sms' }
+            });
+            return;
+          }
+          canalesValidos = [canal];
+        }
+      }
 
       const client = await postgresPool.connect();
       try {
+        // Construir query dinámico para actualizar solo los campos proporcionados
+        const updates: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        if (titulo !== undefined) {
+          updates.push(`titulo = $${paramIndex}`);
+          values.push(titulo);
+          paramIndex++;
+        }
+        if (contenido !== undefined) {
+          updates.push(`contenido = $${paramIndex}`);
+          values.push(contenido);
+          paramIndex++;
+        }
+        if (tipo_mensaje !== undefined) {
+          updates.push(`tipo_mensaje = $${paramIndex}`);
+          values.push(tipo_mensaje);
+          paramIndex++;
+        }
+        if (fecha_programado !== undefined) {
+          updates.push(`fecha_programado = $${paramIndex}`);
+          values.push(fecha_programado);
+          paramIndex++;
+          updates.push(`estado = $${paramIndex}`);
+          values.push(fecha_programado ? 'programado' : 'borrador');
+          paramIndex++;
+        }
+        if (canalesValidos !== undefined) {
+          // Guardar canal como array JSON o string según la estructura de la BD
+          const canalParaBD = canalesValidos.length === 1 ? canalesValidos[0] : JSON.stringify(canalesValidos);
+          updates.push(`canal = $${paramIndex}`);
+          values.push(canalParaBD);
+          paramIndex++;
+        }
+
+        if (updates.length === 0) {
+          res.status(400).json({
+            success: false,
+            error: { message: 'No hay campos para actualizar' }
+          });
+          return;
+        }
+
+        updates.push(`fecha_actualizacion = CURRENT_TIMESTAMP`);
+        values.push(parseInt(id));
+
         const result = await client.query(
           `UPDATE mensajes_difusion
-           SET titulo = $1, contenido = $2, tipo_mensaje = $3, fecha_programado = $4,
-               estado = $5, fecha_actualizacion = CURRENT_TIMESTAMP
-           WHERE id = $6
+           SET ${updates.join(', ')}
+           WHERE id = $${paramIndex}
            RETURNING *`,
-          [
-            titulo ?? '',
-            contenido ?? '',
-            tipo_mensaje ?? '',
-            fecha_programado ?? null,
-            fecha_programado ? 'programado' : 'borrador',
-            parseInt(id)
-          ]
+          values
         );
 
         if (result.rows.length === 0) {
@@ -639,7 +785,8 @@ export class MensajeController {
             md.*,
             p.nombres,
             p.apellidos,
-            p.email as paciente_email
+            p.email as paciente_email,
+            p.telefono as paciente_telefono
           FROM mensajes_destinatarios md
           LEFT JOIN pacientes p ON md.paciente_id = p.id
           WHERE md.mensaje_id = $1`,
@@ -681,6 +828,9 @@ export class MensajeController {
             md.id,
             md.paciente_id,
             md.estado_envio,
+            md.telefono as telefono_destinatario,
+            md.email as email_destinatario,
+            md.canal as canal_destinatario,
             p.id as paciente_id_full,
             p.nombres,
             p.apellidos,
@@ -701,14 +851,15 @@ export class MensajeController {
           id: dest.paciente_id_full,
           nombres: dest.nombres,
           apellidos: dest.apellidos,
-          email: dest.email,
-          telefono: dest.telefono,
+          email: dest.email_destinatario || dest.email,
+          telefono: dest.telefono_destinatario || dest.telefono,
           edad: dest.edad,
           sexo: dest.sexo,
           activo: dest.activo,
           cedula: dest.cedula,
           estado_envio: dest.estado_envio,
-          seleccionado: true // Ya estÃ¡n seleccionados
+          canal: dest.canal_destinatario,
+          seleccionado: true // Ya están seleccionados
         }));
 
         res.json({
@@ -752,9 +903,37 @@ export class MensajeController {
       try {
         await client.query('BEGIN');
 
-        // Obtener emails de los pacientes
+        // Obtener el canal del mensaje
+        const mensajeResult = await client.query(
+          'SELECT canal FROM mensajes_difusion WHERE id = $1',
+          [parseInt(id)]
+        );
+
+        if (mensajeResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          res.status(404).json({
+            success: false,
+            error: { message: 'Mensaje no encontrado' }
+          });
+          return;
+        }
+
+        // Normalizar canal (puede ser string, array o JSON string)
+        let canalMensaje: string | string[] = mensajeResult.rows[0].canal || 'email';
+        try {
+          // Intentar parsear si es JSON string
+          if (typeof canalMensaje === 'string' && canalMensaje.startsWith('[')) {
+            canalMensaje = JSON.parse(canalMensaje);
+          }
+        } catch {
+          // Si no es JSON, mantener como string
+        }
+        
+        const canalesMensaje: string[] = Array.isArray(canalMensaje) ? canalMensaje : [canalMensaje];
+
+        // Obtener emails y teléfonos de los pacientes
         const pacientesResult = await client.query(
-          'SELECT id, email FROM pacientes WHERE id = ANY($1::int[])',
+          'SELECT id, email, telefono FROM pacientes WHERE id = ANY($1::int[])',
           [destinatarios]
         );
 
@@ -768,16 +947,44 @@ export class MensajeController {
         }
 
         // Crear destinatarios
+        const tieneEmail = canalesMensaje.includes('email');
+        const tieneTelefono = canalesMensaje.includes('whatsapp') || canalesMensaje.includes('sms');
+        
         for (const paciente of pacientesResult.rows) {
-          if (!paciente.id || !paciente.email) {
-            continue; // Skip pacientes sin id o email
+          // Validar según los canales
+          if (tieneEmail && !tieneTelefono && (!paciente.id || !paciente.email)) {
+            continue; // Skip pacientes sin id o email para mensajes solo de email
           }
-          await client.query(
-            `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, estado_envio)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT DO NOTHING`,
-            [parseInt(id), paciente.id, paciente.email, 'pendiente']
-          );
+          if (!tieneEmail && tieneTelefono && (!paciente.id || !paciente.telefono)) {
+            continue; // Skip pacientes sin id o teléfono para mensajes solo de WhatsApp/SMS
+          }
+          if (tieneEmail && tieneTelefono && (!paciente.id || (!paciente.email && !paciente.telefono))) {
+            continue; // Skip pacientes sin id o sin al menos email o teléfono
+          }
+
+          // Si hay múltiples canales, crear un registro por cada canal
+          if (canalesMensaje.length > 1) {
+            for (const canalIndividual of canalesMensaje) {
+              // Validar que el paciente tenga el dato necesario para este canal
+              if (canalIndividual === 'email' && !paciente.email) continue;
+              if ((canalIndividual === 'whatsapp' || canalIndividual === 'sms') && !paciente.telefono) continue;
+              
+              await client.query(
+                `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, telefono, estado_envio, canal)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT DO NOTHING`,
+                [parseInt(id), paciente.id, paciente.email || null, paciente.telefono || null, 'pendiente', canalIndividual]
+              );
+            }
+          } else {
+            // Un solo canal
+            await client.query(
+              `INSERT INTO mensajes_destinatarios (mensaje_id, paciente_id, email, telefono, estado_envio, canal)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT DO NOTHING`,
+              [parseInt(id), paciente.id, paciente.email || null, paciente.telefono || null, 'pendiente', canalesMensaje[0]]
+            );
+          }
         }
 
         // Actualizar total_destinatarios en la tabla mensajes

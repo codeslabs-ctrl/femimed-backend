@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { MensajeController } from '../controllers/mensaje.controller.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
+
+// Aplicar autenticación a todas las rutas de mensajes
+router.use(authenticateToken);
 
 // Obtener todos los mensajes
 router.get('/', MensajeController.getMensajes);
