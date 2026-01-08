@@ -191,7 +191,7 @@ router.post('/whatsapp', async (req: Request, res: Response<ApiResponse>) => {
 
 // POST /api/v1/external/v1/broadcast/enviar
 // Enviar el mensaje más reciente pendiente (busca automáticamente)
-router.post('/enviar', async (req: Request, res: Response<ApiResponse>) => {
+router.post('/enviar', async (_req: Request, res: Response<ApiResponse>) => {
   try {
     const client = await postgresPool.connect();
     

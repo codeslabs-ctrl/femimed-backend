@@ -83,11 +83,34 @@ export class ImportacionController {
       // Extraer texto del documento Word
       const text = await this.parserService.extractTextFromWord(file.buffer);
       
-      // Parsear el documento
-      const parsedData = this.parserService.parseDocument(text, file.originalname);
+      // Dividir el documento en hojas usando "INFORME MEDICO:" como delimitador
+      const pages = this.parserService.splitDocumentIntoPages(text);
+      
+      console.log(`📄 Documento dividido en ${pages.length} hoja(s)`);
+
+      if (pages.length === 0) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'No se encontraron hojas en el documento' }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Parsear la primera página para obtener datos del paciente
+      const firstPage = pages[0];
+      if (!firstPage) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'No se pudo obtener la primera página del documento' }
+        };
+        res.status(400).json(response);
+        return;
+      }
+      const firstPageData = this.parserService.parseDocument(firstPage, file.originalname);
 
       // Validar datos mínimos del paciente
-      if (!parsedData.paciente.nombres || !parsedData.paciente.apellidos) {
+      if (!firstPageData.paciente.nombres || !firstPageData.paciente.apellidos) {
         const response: ApiResponse = {
           success: false,
           error: { message: 'No se pudo extraer el nombre completo del paciente del documento' }
@@ -96,18 +119,20 @@ export class ImportacionController {
         return;
       }
 
-      // Buscar o crear paciente
+      // IMPORTANTE: Buscar o crear paciente SOLO UNA VEZ (usando datos de la primera página)
+      // Todas las hojas del documento pertenecen al mismo paciente
+      // Cada hoja creará un registro separado en historico_pacientes, pero el paciente es único
       let pacienteId: number | undefined;
-      let newHistoriaId: number | undefined;
+      const historiasCreadas: number[] = [];
 
       // PostgreSQL implementation
       const client = await postgresPool.connect();
       try {
         // Intentar buscar por cédula primero
-        if (parsedData.paciente.cedula) {
+        if (firstPageData.paciente.cedula) {
           const result = await client.query(
             'SELECT id FROM pacientes WHERE cedula = $1 LIMIT 1',
-            [parsedData.paciente.cedula]
+            [firstPageData.paciente.cedula]
           );
 
           if (result.rows.length > 0) {
@@ -116,10 +141,10 @@ export class ImportacionController {
         }
 
         // Si no se encontró por cédula, buscar por email
-        if (!pacienteId && parsedData.paciente.email) {
+        if (!pacienteId && firstPageData.paciente.email) {
           const result = await client.query(
             'SELECT id FROM pacientes WHERE email = $1 LIMIT 1',
-            [parsedData.paciente.email]
+            [firstPageData.paciente.email]
           );
 
           if (result.rows.length > 0) {
@@ -130,11 +155,18 @@ export class ImportacionController {
         // Si no existe el paciente, crearlo
         if (!pacienteId) {
           // Determinar sexo por defecto si no está especificado
-          const sexo = parsedData.paciente.sexo || 'Femenino'; // Por defecto Femenino para ginecología
+          const sexo = firstPageData.paciente.sexo || 'Femenino'; // Por defecto Femenino para ginecología
 
           // Capitalizar nombres y apellidos
-          const nombresCapitalizados = this.capitalizeName(parsedData.paciente.nombres);
-          const apellidosCapitalizados = this.capitalizeName(parsedData.paciente.apellidos);
+          const nombresCapitalizados = this.capitalizeName(firstPageData.paciente.nombres);
+          const apellidosCapitalizados = this.capitalizeName(firstPageData.paciente.apellidos);
+
+          // Validar y ajustar edad: debe estar en rango válido (1-150) para cumplir con constraint
+          let edadFinal = firstPageData.paciente.edad;
+          if (!edadFinal || edadFinal < 1 || edadFinal > 150) {
+            console.warn(`⚠️ Edad inválida o no encontrada (${edadFinal}), usando valor por defecto: 1`);
+            edadFinal = 1; // Valor mínimo válido para constraint
+          }
 
           const insertResult = await client.query(
             `INSERT INTO pacientes (
@@ -144,30 +176,32 @@ export class ImportacionController {
             [
               nombresCapitalizados,
               apellidosCapitalizados,
-              parsedData.paciente.cedula || null,
-              parsedData.paciente.email || null,
-              parsedData.paciente.telefono || null,
-              parsedData.paciente.edad || null,
+              firstPageData.paciente.cedula || null,
+              firstPageData.paciente.email || null,
+              firstPageData.paciente.telefono || null,
+              edadFinal,
               sexo,
               process.env['CLINICA_ALIAS'] || 'femimed'
             ]
           );
 
           pacienteId = insertResult.rows[0].id;
+          console.log(`✅ Paciente creado con ID: ${pacienteId}`);
         } else {
           // Actualizar paciente existente si hay datos nuevos
+          console.log(`✅ Paciente existente encontrado con ID: ${pacienteId}`);
           const updateData: any = {};
           
           // Capitalizar nombres y apellidos si están presentes
-          if (parsedData.paciente.nombres) {
-            updateData.nombres = this.capitalizeName(parsedData.paciente.nombres);
+          if (firstPageData.paciente.nombres) {
+            updateData.nombres = this.capitalizeName(firstPageData.paciente.nombres);
           }
-          if (parsedData.paciente.apellidos) {
-            updateData.apellidos = this.capitalizeName(parsedData.paciente.apellidos);
+          if (firstPageData.paciente.apellidos) {
+            updateData.apellidos = this.capitalizeName(firstPageData.paciente.apellidos);
           }
-          if (parsedData.paciente.email) updateData.email = parsedData.paciente.email;
-          if (parsedData.paciente.telefono) updateData.telefono = parsedData.paciente.telefono;
-          if (parsedData.paciente.edad) updateData.edad = parsedData.paciente.edad;
+          if (firstPageData.paciente.email) updateData.email = firstPageData.paciente.email;
+          if (firstPageData.paciente.telefono) updateData.telefono = firstPageData.paciente.telefono;
+          if (firstPageData.paciente.edad) updateData.edad = firstPageData.paciente.edad;
           
           // Siempre actualizar clinica_alias
           updateData.clinica_alias = process.env['CLINICA_ALIAS'] || 'femimed';
@@ -184,41 +218,77 @@ export class ImportacionController {
           }
         }
 
-        // Crear historia médica
-        const historiaContent = this.parserService.formatHistoriaContent(parsedData.historia);
-        
-        // Combinar motivo_consulta y otros campos en el contenido
-        let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
-        let diagnostico = parsedData.historia.diagnostico || '';
-        let conclusiones = parsedData.historia.conclusiones || '';
-        let plan = parsedData.historia.plan || '';
+        // Procesar cada hoja como un registro separado en historico_pacientes
+        // IMPORTANTE: Todas las hojas usan el mismo pacienteId (paciente único)
+        for (let i = 0; i < pages.length; i++) {
+          const pageText = pages[i];
+          if (!pageText) {
+            console.warn(`⚠️ Hoja ${i + 1} está vacía, saltando...`);
+            continue;
+          }
+          console.log(`📋 Procesando hoja ${i + 1} de ${pages.length} para paciente ID: ${pacienteId}`);
+          
+          // Parsear cada hoja
+          const parsedData = this.parserService.parseDocument(pageText, file.originalname);
 
-        // Si hay diagnóstico en el contenido formateado, extraerlo
-        if (historiaContent.includes('Diagnóstico:')) {
-          const diagnosticoMatch = historiaContent.match(/<strong>Diagnóstico:<\/strong>\s*([^<]+)/i);
-          if (diagnosticoMatch && diagnosticoMatch[1]) {
-            diagnostico = diagnosticoMatch[1].trim();
+          // Crear historia médica para esta hoja
+          const historiaContent = this.parserService.formatHistoriaContent(parsedData.historia);
+          
+          // Extraer campos individuales
+          let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
+          let diagnostico = parsedData.historia.diagnostico || '';
+          let conclusiones = parsedData.historia.conclusiones || '';
+          let plan = parsedData.historia.plan || '';
+          let antecedentesPersonales = parsedData.historia.antecedentes_personales || '';
+          let antecedentesFamiliares = parsedData.historia.antecedentes_familiares || '';
+          let antecedentesQuirurgicos = parsedData.historia.antecedentes_quirurgicos || '';
+          let antecedentesOtros = parsedData.historia.antecedentes_otros || '';
+
+          // Si hay diagnóstico en el contenido formateado, extraerlo
+          if (historiaContent.includes('Diagnóstico:')) {
+            const diagnosticoMatch = historiaContent.match(/<strong>Diagnóstico:<\/strong>\s*([^<]+)/i);
+            if (diagnosticoMatch && diagnosticoMatch[1]) {
+              diagnostico = diagnosticoMatch[1].trim();
+            }
+          }
+
+          // motivo_consulta debe contener SOLO el motivo de consulta
+          const motivoConsultaFormateado = motivoConsulta ? `<p>${motivoConsulta}</p>` : '<p>Consulta médica</p>';
+
+          // Usar la fecha extraída de la hoja, o la fecha actual si no se encontró
+          const fechaConsulta = parsedData.historia.fecha_consulta || new Date().toISOString().split('T')[0];
+          console.log(`📅 Fecha de consulta para hoja ${i + 1}: ${fechaConsulta}`);
+
+          const historiaResult = await client.query(
+            `INSERT INTO historico_pacientes (
+              paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
+              antecedentes_personales, antecedentes_familiares, antecedentes_quirurgicos, antecedentes_otros
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id`,
+            [
+              pacienteId,
+              medicoIdToUse,
+              motivoConsultaFormateado,
+              diagnostico ? `<p>${diagnostico}</p>` : null,
+              conclusiones ? `<p>${conclusiones}</p>` : null,
+              plan ? `<p>${plan}</p>` : null,
+              fechaConsulta,
+              process.env['CLINICA_ALIAS'] || 'femimed',
+              antecedentesPersonales ? `<p>${antecedentesPersonales}</p>` : null,
+              antecedentesFamiliares ? `<p>${antecedentesFamiliares}</p>` : null,
+              antecedentesQuirurgicos ? `<p>${antecedentesQuirurgicos}</p>` : null,
+              antecedentesOtros ? `<p>${antecedentesOtros}</p>` : null
+            ]
+          );
+          
+          const historiaId = historiaResult.rows[0]?.id;
+          if (historiaId) {
+            historiasCreadas.push(historiaId);
+            console.log(`✅ Historia creada con ID: ${historiaId} para hoja ${i + 1}`);
+          } else {
+            console.error(`❌ Error: No se pudo obtener el ID de la historia creada para hoja ${i + 1}`);
           }
         }
-
-        const historiaResult = await client.query(
-          `INSERT INTO historico_pacientes (
-            paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          RETURNING id`,
-          [
-            pacienteId,
-            medicoIdToUse,
-            `<p>${motivoConsulta}</p>` + historiaContent,
-            diagnostico ? `<p>${diagnostico}</p>` : null,
-            conclusiones ? `<p>${conclusiones}</p>` : null,
-            plan ? `<p>${plan}</p>` : null,
-            new Date().toISOString().split('T')[0],
-            process.env['CLINICA_ALIAS'] || 'femimed'
-          ]
-        );
-        
-        newHistoriaId = historiaResult.rows[0]?.id;
       } finally {
         client.release();
       }
@@ -227,12 +297,13 @@ export class ImportacionController {
         success: true,
         data: {
           paciente_id: pacienteId,
-          historia_id: newHistoriaId,
+          historia_id: historiasCreadas[0],
+          historias_creadas: historiasCreadas.length,
           paciente: {
-            nombres: parsedData.paciente.nombres,
-            apellidos: parsedData.paciente.apellidos
+            nombres: firstPageData.paciente.nombres,
+            apellidos: firstPageData.paciente.apellidos
           },
-          message: 'Documento importado exitosamente'
+          message: `Documento importado exitosamente. ${historiasCreadas.length} hoja(s) procesada(s)`
         }
       };
 
@@ -296,9 +367,32 @@ export class ImportacionController {
         for (const file of files) {
           try {
             const text = await this.parserService.extractTextFromWord(file.buffer);
-            const parsedData = this.parserService.parseDocument(text, file.originalname);
+            
+            // Dividir el documento en hojas usando "INFORME MEDICO:" como delimitador
+            const pages = this.parserService.splitDocumentIntoPages(text);
+            
+            if (pages.length === 0) {
+              results.fallidos++;
+              results.errores.push({
+                archivo: file.originalname,
+                error: 'No se encontraron hojas en el documento'
+              });
+              continue;
+            }
 
-            if (!parsedData.paciente.nombres || !parsedData.paciente.apellidos) {
+            // Parsear la primera página para obtener datos del paciente
+            const firstPage = pages[0];
+            if (!firstPage) {
+              results.fallidos++;
+              results.errores.push({
+                archivo: file.originalname,
+                error: 'No se pudo obtener la primera página del documento'
+              });
+              continue;
+            }
+            const firstPageData = this.parserService.parseDocument(firstPage, file.originalname);
+
+            if (!firstPageData.paciente.nombres || !firstPageData.paciente.apellidos) {
               results.fallidos++;
               results.errores.push({
                 archivo: file.originalname,
@@ -307,120 +401,157 @@ export class ImportacionController {
               continue;
             }
 
-            // Buscar o crear paciente
+            // Buscar o crear paciente (solo una vez por archivo)
             let pacienteId: number | undefined;
-          if (parsedData.paciente.cedula) {
-            const result = await client.query(
-              'SELECT id FROM pacientes WHERE cedula = $1 LIMIT 1',
-              [parsedData.paciente.cedula]
-            );
-
-            if (result.rows.length > 0) {
-              pacienteId = result.rows[0].id;
-            }
-          }
-
-          if (!pacienteId && parsedData.paciente.email) {
-            const result = await client.query(
-              'SELECT id FROM pacientes WHERE email = $1 LIMIT 1',
-              [parsedData.paciente.email]
-            );
-
-            if (result.rows.length > 0) {
-              pacienteId = result.rows[0].id;
-            }
-          }
-
-          if (!pacienteId) {
-            const sexo = parsedData.paciente.sexo || 'Femenino';
-
-            // Capitalizar nombres y apellidos
-            const nombresCapitalizados = this.capitalizeName(parsedData.paciente.nombres);
-            const apellidosCapitalizados = this.capitalizeName(parsedData.paciente.apellidos);
-
-            const insertResult = await client.query(
-              `INSERT INTO pacientes (
-                nombres, apellidos, cedula, email, telefono, edad, sexo, activo, clinica_alias
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
-              RETURNING id`,
-              [
-                nombresCapitalizados,
-                apellidosCapitalizados,
-                parsedData.paciente.cedula || null,
-                parsedData.paciente.email || null,
-                parsedData.paciente.telefono || null,
-                parsedData.paciente.edad || null,
-                sexo,
-                process.env['CLINICA_ALIAS'] || 'femimed'
-              ]
-            );
-
-            pacienteId = insertResult.rows[0].id;
-            results.pacientes_creados++;
-          } else {
-            // Actualizar paciente existente si hay datos nuevos
-            const updateData: any = {};
-            
-            // Capitalizar nombres y apellidos si están presentes
-            if (parsedData.paciente.nombres) {
-              updateData.nombres = this.capitalizeName(parsedData.paciente.nombres);
-            }
-            if (parsedData.paciente.apellidos) {
-              updateData.apellidos = this.capitalizeName(parsedData.paciente.apellidos);
-            }
-            if (parsedData.paciente.email) updateData.email = parsedData.paciente.email;
-            if (parsedData.paciente.telefono) updateData.telefono = parsedData.paciente.telefono;
-            if (parsedData.paciente.edad) updateData.edad = parsedData.paciente.edad;
-            
-            // Siempre actualizar clinica_alias
-            updateData.clinica_alias = process.env['CLINICA_ALIAS'] || 'femimed';
-
-            if (Object.keys(updateData).length > 0) {
-              const updateFields = Object.keys(updateData).map((key, index) => `${key} = $${index + 1}`).join(', ');
-              const updateValues = Object.values(updateData);
-              updateValues.push(pacienteId);
-              
-              await client.query(
-                `UPDATE pacientes SET ${updateFields} WHERE id = $${updateValues.length}`,
-                updateValues
+            if (firstPageData.paciente.cedula) {
+              const result = await client.query(
+                'SELECT id FROM pacientes WHERE cedula = $1 LIMIT 1',
+                [firstPageData.paciente.cedula]
               );
+
+              if (result.rows.length > 0) {
+                pacienteId = result.rows[0].id;
+              }
             }
-            
-            results.pacientes_actualizados++;
-          }
 
-          // Crear historia médica
-          const historiaContent = this.parserService.formatHistoriaContent(parsedData.historia);
-          let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
-          let diagnostico = parsedData.historia.diagnostico || '';
-          let conclusiones = parsedData.historia.conclusiones || '';
-          let plan = parsedData.historia.plan || '';
+            if (!pacienteId && firstPageData.paciente.email) {
+              const result = await client.query(
+                'SELECT id FROM pacientes WHERE email = $1 LIMIT 1',
+                [firstPageData.paciente.email]
+              );
 
-          if (historiaContent.includes('Diagnóstico:')) {
-            const diagnosticoMatch = historiaContent.match(/<strong>Diagnóstico:<\/strong>\s*([^<]+)/i);
-            if (diagnosticoMatch && diagnosticoMatch[1]) {
-              diagnostico = diagnosticoMatch[1].trim();
+              if (result.rows.length > 0) {
+                pacienteId = result.rows[0].id;
+              }
             }
-          }
 
-          await client.query(
-            `INSERT INTO historico_pacientes (
-              paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-              pacienteId,
-              medicoIdToUse,
-              `<p>${motivoConsulta}</p>` + historiaContent,
-              diagnostico ? `<p>${diagnostico}</p>` : null,
-              conclusiones ? `<p>${conclusiones}</p>` : null,
-              plan ? `<p>${plan}</p>` : null,
-              new Date().toISOString().split('T')[0],
-              process.env['CLINICA_ALIAS'] || 'femimed'
-            ]
-          );
+            if (!pacienteId) {
+              const sexo = firstPageData.paciente.sexo || 'Femenino';
 
-          results.exitosos++;
-          results.historias_creadas++;
+              // Capitalizar nombres y apellidos
+              const nombresCapitalizados = this.capitalizeName(firstPageData.paciente.nombres);
+              const apellidosCapitalizados = this.capitalizeName(firstPageData.paciente.apellidos);
+
+              // Validar y ajustar edad: debe estar en rango válido (1-150) para cumplir con constraint
+              let edadFinal = firstPageData.paciente.edad;
+              if (!edadFinal || edadFinal < 1 || edadFinal > 150) {
+                console.warn(`⚠️ Edad inválida o no encontrada (${edadFinal}), usando valor por defecto: 1`);
+                edadFinal = 1; // Valor mínimo válido para constraint
+              }
+
+              const insertResult = await client.query(
+                `INSERT INTO pacientes (
+                  nombres, apellidos, cedula, email, telefono, edad, sexo, activo, clinica_alias
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
+                RETURNING id`,
+                [
+                  nombresCapitalizados,
+                  apellidosCapitalizados,
+                  firstPageData.paciente.cedula || null,
+                  firstPageData.paciente.email || null,
+                  firstPageData.paciente.telefono || null,
+                  edadFinal,
+                  sexo,
+                  process.env['CLINICA_ALIAS'] || 'femimed'
+                ]
+              );
+
+              pacienteId = insertResult.rows[0].id;
+              results.pacientes_creados++;
+            } else {
+              // Actualizar paciente existente si hay datos nuevos
+              const updateData: any = {};
+              
+              // Capitalizar nombres y apellidos si están presentes
+              if (firstPageData.paciente.nombres) {
+                updateData.nombres = this.capitalizeName(firstPageData.paciente.nombres);
+              }
+              if (firstPageData.paciente.apellidos) {
+                updateData.apellidos = this.capitalizeName(firstPageData.paciente.apellidos);
+              }
+              if (firstPageData.paciente.email) updateData.email = firstPageData.paciente.email;
+              if (firstPageData.paciente.telefono) updateData.telefono = firstPageData.paciente.telefono;
+              if (firstPageData.paciente.edad) updateData.edad = firstPageData.paciente.edad;
+              
+              // Siempre actualizar clinica_alias
+              updateData.clinica_alias = process.env['CLINICA_ALIAS'] || 'femimed';
+
+              if (Object.keys(updateData).length > 0) {
+                const updateFields = Object.keys(updateData).map((key, index) => `${key} = $${index + 1}`).join(', ');
+                const updateValues = Object.values(updateData);
+                updateValues.push(pacienteId);
+                
+                await client.query(
+                  `UPDATE pacientes SET ${updateFields} WHERE id = $${updateValues.length}`,
+                  updateValues
+                );
+              }
+              
+              results.pacientes_actualizados++;
+            }
+
+            // Procesar cada hoja como un registro separado en historico_pacientes
+            // IMPORTANTE: Todas las hojas usan el mismo pacienteId (paciente único)
+            for (let i = 0; i < pages.length; i++) {
+              const pageText = pages[i];
+              if (!pageText) {
+                console.warn(`⚠️ Hoja ${i + 1} del archivo ${file.originalname} está vacía, saltando...`);
+                continue;
+              }
+              console.log(`📋 Procesando hoja ${i + 1} de ${pages.length} del archivo ${file.originalname} para paciente ID: ${pacienteId}`);
+              
+              // Parsear cada hoja
+              const parsedData = this.parserService.parseDocument(pageText, file.originalname);
+
+              // Crear historia médica para esta hoja
+              const historiaContent = this.parserService.formatHistoriaContent(parsedData.historia);
+              let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
+              let diagnostico = parsedData.historia.diagnostico || '';
+              let conclusiones = parsedData.historia.conclusiones || '';
+              let plan = parsedData.historia.plan || '';
+              let antecedentesPersonales = parsedData.historia.antecedentes_personales || '';
+              let antecedentesFamiliares = parsedData.historia.antecedentes_familiares || '';
+              let antecedentesQuirurgicos = parsedData.historia.antecedentes_quirurgicos || '';
+              let antecedentesOtros = parsedData.historia.antecedentes_otros || '';
+
+              if (historiaContent.includes('Diagnóstico:')) {
+                const diagnosticoMatch = historiaContent.match(/<strong>Diagnóstico:<\/strong>\s*([^<]+)/i);
+                if (diagnosticoMatch && diagnosticoMatch[1]) {
+                  diagnostico = diagnosticoMatch[1].trim();
+                }
+              }
+
+              // motivo_consulta debe contener SOLO el motivo de consulta
+              const motivoConsultaFormateado = motivoConsulta ? `<p>${motivoConsulta}</p>` : '<p>Consulta médica</p>';
+
+              // Usar la fecha extraída de la hoja, o la fecha actual si no se encontró
+              const fechaConsulta = parsedData.historia.fecha_consulta || new Date().toISOString().split('T')[0];
+
+              await client.query(
+                `INSERT INTO historico_pacientes (
+                  paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
+                  antecedentes_personales, antecedentes_familiares, antecedentes_quirurgicos, antecedentes_otros
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                [
+                  pacienteId,
+                  medicoIdToUse,
+                  motivoConsultaFormateado,
+                  diagnostico ? `<p>${diagnostico}</p>` : null,
+                  conclusiones ? `<p>${conclusiones}</p>` : null,
+                  plan ? `<p>${plan}</p>` : null,
+                  fechaConsulta,
+                  process.env['CLINICA_ALIAS'] || 'femimed',
+                  antecedentesPersonales ? `<p>${antecedentesPersonales}</p>` : null,
+                  antecedentesFamiliares ? `<p>${antecedentesFamiliares}</p>` : null,
+                  antecedentesQuirurgicos ? `<p>${antecedentesQuirurgicos}</p>` : null,
+                  antecedentesOtros ? `<p>${antecedentesOtros}</p>` : null
+                ]
+              );
+
+              results.historias_creadas++;
+            }
+
+            results.exitosos++;
         } catch (error) {
           results.fallidos++;
           results.errores.push({

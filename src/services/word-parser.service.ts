@@ -18,11 +18,13 @@ export interface ParsedHistoriaData {
   antecedentes_familiares?: string;
   antecedentes_ginecoobstetricos?: string;
   antecedentes_quirurgicos?: string;
+  antecedentes_otros?: string;
   examen_fisico?: string;
   ultrasonido?: string;
   diagnostico?: string;
   conclusiones?: string;
   plan?: string;
+  fecha_consulta?: string; // Fecha extraída antes de "INFORME MEDICO:"
 }
 
 export interface ParsedMedicoData {
@@ -42,14 +44,103 @@ export interface ParsedDocumentData {
 export class WordParserService {
   /**
    * Convierte un archivo Word a texto plano
+   * Usa convertToHtml primero para asegurar que se capture todo el contenido, incluyendo múltiples páginas
    */
   async extractTextFromWord(buffer: Buffer): Promise<string> {
     try {
-      const result = await mammoth.extractRawText({ buffer });
-      return result.value;
+      // Intentar primero con extractRawText
+      const rawResult = await mammoth.extractRawText({ buffer });
+      let text = rawResult.value;
+      
+      // Si el texto parece estar incompleto (menos de 100 caracteres), intentar con convertToHtml
+      // Esto puede ayudar con documentos complejos o con múltiples páginas
+      if (text.length < 100) {
+        const htmlResult = await mammoth.convertToHtml({ buffer });
+        // Extraer texto del HTML removiendo tags
+        text = htmlResult.value
+          .replace(/<[^>]*>/g, ' ') // Remover tags HTML
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      
+      // Log para debugging (puedes remover esto después)
+      console.log(`📄 Texto extraído: ${text.length} caracteres`);
+      
+      return text;
     } catch (error) {
       throw new Error(`Error extrayendo texto del documento: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Divide el documento en hojas separadas usando "INFORME MEDICO:" como delimitador
+   */
+  splitDocumentIntoPages(text: string): string[] {
+    // Dividir por "INFORME MEDICO:" o "INFORME MÉDICO:" (con acento)
+    // Usar lookahead positivo para incluir "INFORME MEDICO:" al inicio de cada hoja
+    const pages = text.split(/(?=INFORME\s+M[EÉ]DICO?:)/i);
+    
+    // Filtrar páginas vacías y devolver solo las que tienen contenido
+    // También eliminar la primera página si está vacía (puede ocurrir si el documento empieza con "INFORME MEDICO:")
+    const filteredPages = pages
+      .map(page => page.trim())
+      .filter(page => page.length > 0 && page.toLowerCase().includes('informe'));
+    
+    console.log(`📑 Documento dividido en ${filteredPages.length} hoja(s)`);
+    filteredPages.forEach((page, index) => {
+      const preview = page.substring(0, 150).replace(/\n/g, ' ');
+      console.log(`  Hoja ${index + 1} (${page.length} caracteres): ${preview}...`);
+    });
+    
+    return filteredPages;
+  }
+
+  /**
+   * Extrae la fecha que está antes de "INFORME MEDICO:"
+   * Formato esperado: "Caracas 16.11.2023" o similar
+   * Nota: Cuando se divide el documento, cada hoja ya incluye "INFORME MEDICO:" al inicio
+   * Por lo tanto, buscamos la fecha al inicio de la hoja o antes de "INFORME MEDICO:"
+   */
+  extractFechaConsulta(text: string): string | undefined {
+    // Buscar patrón: ciudad/ubicación seguido de fecha
+    // Ejemplos: "Caracas 16.11.2023", "Valencia 01/12/2024", etc.
+    // Primero intentar buscar antes de "INFORME MEDICO:" (si está presente)
+    let fechaMatch = text.match(/([A-ZÁÉÍÓÚÑ\s]+)\s+(\d{1,2}[./]\d{1,2}[./]\d{4})\s*INFORME\s+M[EÉ]DICO?:/i);
+    
+    // Si no se encuentra, buscar al inicio de la hoja (formato: "Ciudad DD.MM.YYYY")
+    if (!fechaMatch) {
+      fechaMatch = text.match(/^([A-ZÁÉÍÓÚÑ\s]+)\s+(\d{1,2}[./]\d{1,2}[./]\d{4})/i);
+    }
+    
+    // Si aún no se encuentra, buscar en cualquier parte del texto (formato más flexible)
+    if (!fechaMatch) {
+      fechaMatch = text.match(/([A-ZÁÉÍÓÚÑ\s]{3,})\s+(\d{1,2}[./]\d{1,2}[./]\d{4})/i);
+    }
+    
+    if (fechaMatch && fechaMatch[2]) {
+      const fechaStr = fechaMatch[2];
+      const ciudad = fechaMatch[1] ? fechaMatch[1].trim() : '';
+      // Convertir a formato YYYY-MM-DD
+      const dateParts = fechaStr.split(/[./]/);
+      if (dateParts.length === 3 && dateParts[0] && dateParts[1] && dateParts[2]) {
+        const day = dateParts[0].padStart(2, '0');
+        const month = dateParts[1].padStart(2, '0');
+        const year = dateParts[2];
+        const fechaFormateada = `${year}-${month}-${day}`;
+        console.log(`📅 Fecha extraída: "${ciudad} ${fechaStr}" -> ${fechaFormateada}`);
+        return fechaFormateada;
+      }
+      const fechaFormateada = fechaStr.replace(/\./g, '-').replace(/\//g, '-');
+      console.log(`📅 Fecha extraída (formato alternativo): ${fechaStr} -> ${fechaFormateada}`);
+      return fechaFormateada;
+    }
+    
+    console.warn('⚠️ No se pudo extraer la fecha de consulta del documento');
+    return undefined;
   }
 
   /**
@@ -64,6 +155,12 @@ export class WordParserService {
 
     // Extraer historia médica
     const historia = this.extractHistoriaData(lines, fullText);
+
+    // Extraer fecha de consulta antes de "INFORME MEDICO:"
+    const fechaConsulta = this.extractFechaConsulta(fullText);
+    if (fechaConsulta) {
+      historia.fecha_consulta = fechaConsulta;
+    }
 
     // Extraer datos del médico (si están disponibles)
     const medico = this.extractMedicoData(lines, fullText);
@@ -117,10 +214,15 @@ export class WordParserService {
       }
     }
 
-    // Extraer edad
-    const edadMatch = fullText.match(/Edad\s+(\d+)\s*(años|año)?/i);
+    // Extraer edad - formato: "Edad 26 años" o "Edad 26" o "Edad: 26 años"
+    // Solo captura el valor numérico (el grupo de captura (\d+))
+    const edadMatch = fullText.match(/Edad\s*:?\s*(\d+)\s*(años|año)?/i);
     if (edadMatch && edadMatch[1]) {
-      paciente.edad = parseInt(edadMatch[1]);
+      // Solo guardar el valor numérico, no el texto completo
+      paciente.edad = parseInt(edadMatch[1], 10);
+      console.log(`📊 Edad extraída (solo número): ${paciente.edad}`);
+    } else {
+      console.warn('⚠️ No se pudo extraer la edad del documento');
     }
 
     // Extraer cédula (CI o Cédula) - puede tener formato "V- 24.801.037" o "V24801037"
@@ -131,21 +233,30 @@ export class WordParserService {
       paciente.cedula = cedulaMatch[1].replace(/\s+/g, '').replace(/\./g, '').toUpperCase();
     }
 
-    // Extraer email (puede ser "CORREO. email@example.com" o "Email: email@example.com")
+    // Extraer email - formato: "CORREO. email@example.com" o "Email: email@example.com"
+    // El punto después de CORREO puede estar o no, y puede haber espacios
     const emailMatch = fullText.match(/CORREO\.?\s*:?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
                       fullText.match(/Email\s*:?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
                       fullText.match(/email\s*:?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
     if (emailMatch && emailMatch[1]) {
       paciente.email = emailMatch[1].trim();
+      console.log(`📧 Email extraído: ${paciente.email}`);
+    } else {
+      console.warn('⚠️ No se pudo extraer el email del documento');
     }
 
-    // Extraer teléfono (puede tener formato "0414-2225888" o "04241234567")
-    const telefonoMatch = fullText.match(/TLF\s*:?\s*([0-9-]+)/i) ||
-                         fullText.match(/Teléfono\s*:?\s*([0-9-]+)/i) ||
-                         fullText.match(/Telf\s*:?\s*([0-9-]+)/i) ||
-                         fullText.match(/Teléf\s*:?\s*([0-9-]+)/i);
+    // Extraer teléfono - formato: "TLF 0412.7085759" o "TLF 0414-2225888" o "04241234567"
+    // Puede tener puntos, guiones o espacios
+    const telefonoMatch = fullText.match(/TLF\s*:?\s*([0-9.\-\s]+)/i) ||
+                         fullText.match(/Teléfono\s*:?\s*([0-9.\-\s]+)/i) ||
+                         fullText.match(/Telf\s*:?\s*([0-9.\-\s]+)/i) ||
+                         fullText.match(/Teléf\s*:?\s*([0-9.\-\s]+)/i);
     if (telefonoMatch && telefonoMatch[1]) {
-      paciente.telefono = telefonoMatch[1].trim();
+      // Limpiar puntos y espacios, mantener solo números y guiones
+      paciente.telefono = telefonoMatch[1].replace(/\./g, '').replace(/\s+/g, '').trim();
+      console.log(`📱 Teléfono extraído: ${paciente.telefono}`);
+    } else {
+      console.warn('⚠️ No se pudo extraer el teléfono del documento');
     }
 
     // Determinar sexo basado en contexto (ginecología sugiere Femenino)
@@ -188,8 +299,8 @@ export class WordParserService {
   private extractHistoriaData(_lines: string[], fullText: string): ParsedHistoriaData {
     const historia: ParsedHistoriaData = {};
 
-    // Extraer motivo de consulta (puede estar en la misma línea o después de dos puntos)
-    const motivoMatch = fullText.match(/MOTIVO\s+DE\s+CONSULTA\s*:?\s*([^\n_]+)/i);
+    // Extraer motivo de consulta - captura hasta la siguiente sección (ANTECEDENTES, EXAMEN, etc.)
+    const motivoMatch = fullText.match(/MOTIVO\s+DE\s+CONSULTA\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO|Ultrasonido)[^\n]+)*)/i);
     if (motivoMatch && motivoMatch[1]) {
       historia.motivo_consulta = motivoMatch[1].trim();
     }
@@ -206,16 +317,54 @@ export class WordParserService {
       historia.antecedentes_familiares = antecedentesFamiliaresMatch[1].trim();
     }
 
-    // Extraer antecedentes ginecoobstétricos
-    const antecedentesGinecoMatch = fullText.match(/ANTECEDENTES\s+GINECOOBSTETRICOS?\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
-    if (antecedentesGinecoMatch && antecedentesGinecoMatch[1]) {
-      historia.antecedentes_ginecoobstetricos = antecedentesGinecoMatch[1].trim();
-    }
-
     // Extraer antecedentes quirúrgicos
     const antecedentesQuirurgicosMatch = fullText.match(/ANTECEDENTES\s+QUIRURGICOS?\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
     if (antecedentesQuirurgicosMatch && antecedentesQuirurgicosMatch[1]) {
       historia.antecedentes_quirurgicos = antecedentesQuirurgicosMatch[1].trim();
+    }
+
+    // Extraer antecedentes otros: cualquier sección ANTECEDENTES que NO sea PERSONALES, FAMILIARES o QUIRURGICOS
+    // Esto incluye: GINECOOBSTETRICOS, PATOLOGICOS, ALERGICOS, etc.
+    const antecedentesOtrosSections: string[] = [];
+    
+    // Buscar todas las secciones que empiecen con "ANTECEDENTES" seguido de cualquier palabra
+    // y luego filtrar las que NO sean PERSONALES, FAMILIARES o QUIRURGICOS
+    // Mejorado: usar un patrón más robusto que capture el tipo completo y el contenido
+    const allAntecedentesRegex = /ANTECEDENTES\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*)\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO|Ultrasonido)[^\n]+)*)/gi;
+    let match;
+    while ((match = allAntecedentesRegex.exec(fullText)) !== null) {
+      const tipoAntecedente = match[1]?.trim();
+      const contenido = match[2]?.trim();
+      
+      // Debug: log para ver qué se está capturando
+      console.log(`[WordParser] Antecedentes encontrado - Tipo: "${tipoAntecedente}", Contenido: "${contenido?.substring(0, 50)}..."`);
+      
+      // Solo agregar si tiene contenido y NO es una de las secciones ya procesadas
+      if (tipoAntecedente && contenido) {
+        const tipoNormalizado = tipoAntecedente.toUpperCase().trim();
+        // Excluir PERSONALES, FAMILIARES, QUIRURGICOS (ya procesados arriba)
+        if (!tipoNormalizado.match(/^(PERSONALES|FAMILIARES|QUIRURGICOS)$/i)) {
+          console.log(`[WordParser] Agregando a antecedentes_otros: "${tipoAntecedente}"`);
+          antecedentesOtrosSections.push(`${tipoAntecedente}: ${contenido}`);
+        }
+      }
+    }
+    
+    // Si hay secciones encontradas, combinarlas en antecedentes_otros
+    if (antecedentesOtrosSections.length > 0) {
+      historia.antecedentes_otros = antecedentesOtrosSections.join('\n\n');
+    }
+    
+    // También buscar explícitamente "ANTECEDENTES OTROS" si existe
+    const antecedentesOtrosExplicitMatch = fullText.match(/ANTECEDENTES\s+OTROS?\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
+    if (antecedentesOtrosExplicitMatch && antecedentesOtrosExplicitMatch[1]) {
+      const contenidoExplicito = antecedentesOtrosExplicitMatch[1].trim();
+      // Si ya hay contenido en antecedentes_otros, agregarlo; si no, establecerlo
+      if (historia.antecedentes_otros) {
+        historia.antecedentes_otros = `${historia.antecedentes_otros}\n\nOTROS: ${contenidoExplicito}`;
+      } else {
+        historia.antecedentes_otros = contenidoExplicito;
+      }
     }
 
     // Extraer examen físico

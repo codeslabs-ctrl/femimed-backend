@@ -48,17 +48,18 @@ export const corsMiddleware = cors({
       return callback(null, true);
     }
     
-    // Verificar si el origen estÃ¡ permitido
+    // Verificar si el origen está permitido
     const normalized = normalizeOrigin(origin);
     if (allowedOrigins.includes(normalized)) {
       callback(null, true);
     } else {
+      console.warn(`⚠️ CORS bloqueado para origen: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Content-Length']
 });
 
 // Rate limiting eliminado - No se aplican lÃ­mites de tiempo a las peticiones
