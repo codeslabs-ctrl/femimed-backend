@@ -8,6 +8,10 @@ export interface HistoricoData {
   diagnostico?: string;
   conclusiones?: string;
   plan?: string;
+  antecedentes_personales?: string;
+  antecedentes_familiares?: string;
+  antecedentes_quirurgicos?: string;
+  antecedentes_otros?: string;
   fecha_consulta: string;
   fecha_creacion: string;
   fecha_actualizacion: string;
@@ -39,6 +43,10 @@ export class HistoricoService {
           h.diagnostico,
           h.conclusiones,
           h.plan,
+          h.antecedentes_personales,
+          h.antecedentes_familiares,
+          h.antecedentes_quirurgicos,
+          h.antecedentes_otros,
           h.fecha_consulta,
           h.fecha_creacion,
           h.fecha_actualizacion,
@@ -69,6 +77,10 @@ export class HistoricoService {
         diagnostico: row.diagnostico,
         conclusiones: row.conclusiones,
         plan: row.plan,
+        antecedentes_personales: row.antecedentes_personales,
+        antecedentes_familiares: row.antecedentes_familiares,
+        antecedentes_quirurgicos: row.antecedentes_quirurgicos,
+        antecedentes_otros: row.antecedentes_otros,
         fecha_consulta: row.fecha_consulta,
         fecha_creacion: row.fecha_creacion,
         fecha_actualizacion: row.fecha_actualizacion,
@@ -102,6 +114,10 @@ export class HistoricoService {
             h.diagnostico,
             h.conclusiones,
             h.plan,
+            h.antecedentes_personales,
+            h.antecedentes_familiares,
+            h.antecedentes_quirurgicos,
+            h.antecedentes_otros,
             h.fecha_consulta,
             h.fecha_creacion,
             h.fecha_actualizacion,
@@ -117,7 +133,7 @@ export class HistoricoService {
           LEFT JOIN medicos m ON h.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
           WHERE h.paciente_id = $1
-          ORDER BY h.fecha_consulta DESC
+          ORDER BY h.id DESC
         `;
 
         const result = await client.query(query, [pacienteId]);
@@ -130,6 +146,10 @@ export class HistoricoService {
           diagnostico: row.diagnostico,
           conclusiones: row.conclusiones,
           plan: row.plan,
+          antecedentes_personales: row.antecedentes_personales,
+          antecedentes_familiares: row.antecedentes_familiares,
+          antecedentes_quirurgicos: row.antecedentes_quirurgicos,
+          antecedentes_otros: row.antecedentes_otros,
           fecha_consulta: row.fecha_consulta,
           fecha_creacion: row.fecha_creacion,
           fecha_actualizacion: row.fecha_actualizacion,
@@ -171,6 +191,10 @@ export class HistoricoService {
             h.diagnostico,
             h.conclusiones,
             h.plan,
+            h.antecedentes_personales,
+            h.antecedentes_familiares,
+            h.antecedentes_quirurgicos,
+            h.antecedentes_otros,
             h.fecha_consulta,
             h.fecha_creacion,
             h.fecha_actualizacion,
@@ -199,6 +223,10 @@ export class HistoricoService {
           diagnostico: row.diagnostico,
           conclusiones: row.conclusiones,
           plan: row.plan,
+          antecedentes_personales: row.antecedentes_personales,
+          antecedentes_familiares: row.antecedentes_familiares,
+          antecedentes_quirurgicos: row.antecedentes_quirurgicos,
+          antecedentes_otros: row.antecedentes_otros,
           fecha_consulta: row.fecha_consulta,
           fecha_creacion: row.fecha_creacion,
           fecha_actualizacion: row.fecha_actualizacion,
@@ -235,6 +263,10 @@ export class HistoricoService {
             h.diagnostico,
             h.conclusiones,
             h.plan,
+            h.antecedentes_personales,
+            h.antecedentes_familiares,
+            h.antecedentes_quirurgicos,
+            h.antecedentes_otros,
             h.fecha_consulta,
             h.fecha_creacion,
             h.fecha_actualizacion,
@@ -262,6 +294,10 @@ export class HistoricoService {
           diagnostico: row.diagnostico,
           conclusiones: row.conclusiones,
           plan: row.plan,
+          antecedentes_personales: row.antecedentes_personales,
+          antecedentes_familiares: row.antecedentes_familiares,
+          antecedentes_quirurgicos: row.antecedentes_quirurgicos,
+          antecedentes_otros: row.antecedentes_otros,
           fecha_consulta: row.fecha_consulta,
           fecha_creacion: row.fecha_creacion,
           fecha_actualizacion: row.fecha_actualizacion,
@@ -298,6 +334,10 @@ export class HistoricoService {
             h.diagnostico,
             h.conclusiones,
             h.plan,
+            h.antecedentes_personales,
+            h.antecedentes_familiares,
+            h.antecedentes_quirurgicos,
+            h.antecedentes_otros,
             h.fecha_consulta,
             h.fecha_creacion,
             h.fecha_actualizacion,
@@ -341,6 +381,10 @@ export class HistoricoService {
           diagnostico: row.diagnostico,
           conclusiones: row.conclusiones,
           plan: row.plan,
+          antecedentes_personales: row.antecedentes_personales,
+          antecedentes_familiares: row.antecedentes_familiares,
+          antecedentes_quirurgicos: row.antecedentes_quirurgicos,
+          antecedentes_otros: row.antecedentes_otros,
           fecha_consulta: row.fecha_consulta,
           fecha_creacion: row.fecha_creacion,
           fecha_actualizacion: row.fecha_actualizacion,
@@ -490,7 +534,8 @@ export class HistoricoService {
           const query = `
             SELECT 
               h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
-              h.conclusiones, h.plan, h.fecha_consulta, h.fecha_creacion, 
+              h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
+              h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,
               p.nombres as paciente_nombre, p.apellidos as paciente_apellidos,
               m.nombres as medico_nombre, m.apellidos as medico_apellidos,
@@ -523,6 +568,10 @@ export class HistoricoService {
             diagnostico: historia.diagnostico,
             conclusiones: historia.conclusiones,
             plan: historia.plan,
+            antecedentes_personales: historia.antecedentes_personales,
+            antecedentes_familiares: historia.antecedentes_familiares,
+            antecedentes_quirurgicos: historia.antecedentes_quirurgicos,
+            antecedentes_otros: historia.antecedentes_otros,
             fecha_consulta: historia.fecha_consulta,
             fecha_creacion: historia.fecha_creacion,
             fecha_actualizacion: historia.fecha_actualizacion,
@@ -553,7 +602,7 @@ export class HistoricoService {
       console.log('🔍 updateHistorico - updateData:', updateData);
 
       // Filtrar solo los campos que existen en la tabla historico_medico
-      const allowedFields = ['motivo_consulta', 'diagnostico', 'conclusiones', 'plan'];
+      const allowedFields = ['motivo_consulta', 'diagnostico', 'conclusiones', 'plan', 'antecedentes_personales', 'antecedentes_familiares', 'antecedentes_quirurgicos', 'antecedentes_otros'];
       const filteredData: any = {};
       
       for (const [key, value] of Object.entries(updateData)) {
@@ -636,7 +685,8 @@ export class HistoricoService {
           const fullDataQuery = `
             SELECT 
               h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
-              h.conclusiones, h.plan, h.fecha_consulta, h.fecha_creacion, 
+              h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
+              h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,
               p.nombres as paciente_nombre, p.apellidos as paciente_apellidos,
               m.nombres as medico_nombre, m.apellidos as medico_apellidos,
@@ -896,8 +946,9 @@ export class HistoricoService {
           const insertQuery = `
             INSERT INTO historico_pacientes (
               paciente_id, medico_id, motivo_consulta, diagnostico, 
-              conclusiones, plan, fecha_consulta
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+              conclusiones, plan, antecedentes_personales, antecedentes_familiares,
+              antecedentes_quirurgicos, antecedentes_otros, fecha_consulta
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
           `;
           
@@ -910,6 +961,10 @@ export class HistoricoService {
             historicoData.diagnostico || null,
             historicoData.conclusiones || null,
             historicoData.plan || null,
+            historicoData.antecedentes_personales || null,
+            historicoData.antecedentes_familiares || null,
+            historicoData.antecedentes_quirurgicos || null,
+            historicoData.antecedentes_otros || null,
             fechaConsulta
           ]);
 
@@ -920,7 +975,8 @@ export class HistoricoService {
           const fullDataQuery = `
             SELECT 
               h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
-              h.conclusiones, h.plan, h.fecha_consulta, h.fecha_creacion, 
+              h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
+              h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,
               p.nombres as paciente_nombre, p.apellidos as paciente_apellidos,
               m.nombres as medico_nombre, m.apellidos as medico_apellidos
