@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { requireExternalApiKey } from '../../../middleware/external-api-key.js';
 import { ApiResponse } from '../../../types/index.js';
 import { postgresPool } from '../../../config/database.js';
+import { EmailService } from '../../../services/email.service.js';
 
 const router = express.Router();
 
