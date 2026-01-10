@@ -30,9 +30,12 @@ export class PDFService {
           `SELECT 
             i.*,
             m.nombres as medico_nombres,
-            m.apellidos as medico_apellidos
+            m.apellidos as medico_apellidos,
+            m.especialidad_id,
+            e.nombre_especialidad
           FROM informes_medicos i
           LEFT JOIN medicos m ON i.medico_id = m.id
+          LEFT JOIN especialidades e ON m.especialidad_id = e.id
           WHERE i.id = $1
           LIMIT 1`,
           [informeId]
@@ -47,7 +50,8 @@ export class PDFService {
         // Formatear para compatibilidad con el código existente
         informe.medicos = {
           nombres: informe.medico_nombres,
-          apellidos: informe.medico_apellidos
+          apellidos: informe.medico_apellidos,
+          especialidad: informe.nombre_especialidad || 'Medicina General'
         };
       } catch (dbError: any) {
         console.error('❌ Error obteniendo informe de la base de datos:', dbError);
@@ -461,7 +465,7 @@ export class PDFService {
             `}
             <div class="signature-text">
               <strong>Dr. ${informe.medicos?.nombres || ''} ${informe.medicos?.apellidos || ''}</strong><br>
-              Especialista en Ginecología y Obstetricia
+              ${informe.medicos?.especialidad ? `Especialista en ${informe.medicos.especialidad}` : 'Médico'}
             </div>
           </div>
           
@@ -487,8 +491,9 @@ export class PDFService {
     let contenidoProcesado = contenido;
     
     // Reemplazar por una línea descriptiva del paciente (dinámica)
+    // Asegurarse de que no capture los antecedentes que vienen después
     contenidoProcesado = contenidoProcesado.replace(
-      /<h2>Datos del Paciente<\/h2>[\s\S]*?(?=<h2>|<h3>|$)/gi,
+      /<h2>Datos del Paciente<\/h2>[\s\S]*?(?=<h2>Datos del Médico|<h2>|<h3>|<div class="antecedentes-seccion">|$)/gi,
       (_match) => {
         const datos = _match.replace(/<h2>Datos del Paciente<\/h2>/i, '');
 
@@ -533,8 +538,9 @@ export class PDFService {
     );
 
     // Remover completamente la sección "Datos del Médico"
+    // Asegurarse de que no elimine los antecedentes que vienen después
     contenidoProcesado = contenidoProcesado.replace(
-      /<h2>Datos del Médico<\/h2>([\s\S]*?)(?=<h2>|<h3>|$)/gi,
+      /<h2>Datos del Médico<\/h2>([\s\S]*?)(?=<div class="antecedentes-seccion">|<h2>|<h3>|$)/gi,
       ''
     );
     
@@ -560,28 +566,34 @@ export class PDFService {
       }
 
       // Resolver rutas relativas desde la raíz del backend.
-      // En runtime compilado, __dirname apunta a dist/, por eso subimos 2 niveles.
-      const projectRoot = path.join(__dirname, '..', '..');
+      // En runtime compilado, __dirname apunta a dist/services/, por eso subimos 2 niveles para llegar a dist/
+      const distRoot = path.join(__dirname, '..', '..'); // dist/ cuando está compilado
+      const projectRoot = path.join(distRoot, '..'); // raíz del proyecto
 
-      const resolveFromRoot = (p: string): string => {
+      const resolveFromRoot = (p: string, root: string): string => {
         if (path.isAbsolute(p)) return p;
-        return path.resolve(projectRoot, p);
+        return path.resolve(root, p);
       };
 
-      // Candidatos (fallback): primero assets/, luego dist/assets/ (útil si en servidor solo existe dist/assets)
+      // Candidatos (fallback): primero dist/assets/ (cuando está compilado), luego assets/ (desarrollo)
       const candidates: string[] = [];
 
-      const primary = resolveFromRoot(logoPath);
-      candidates.push(primary);
-
-      if (!path.isAbsolute(logoPath)) {
-        // Si el logoPath apunta a ./assets/..., intentar también ./dist/assets/...
-        const normalized = logoPath.replace(/\\/g, '/');
-        if (normalized.startsWith('./assets/')) {
-          candidates.push(resolveFromRoot(normalized.replace('./assets/', './dist/assets/')));
-        } else if (normalized.startsWith('assets/')) {
-          candidates.push(resolveFromRoot(normalized.replace('assets/', 'dist/assets/')));
-        }
+      // Cuando está compilado, los assets están en dist/assets/
+      const normalized = logoPath.replace(/\\/g, '/');
+      if (normalized.startsWith('./assets/')) {
+        // Buscar primero en dist/assets/ (cuando está compilado)
+        candidates.push(resolveFromRoot(normalized.replace('./assets/', './dist/assets/'), distRoot));
+        // Luego en assets/ desde la raíz del proyecto (desarrollo)
+        candidates.push(resolveFromRoot(logoPath, projectRoot));
+      } else if (normalized.startsWith('assets/')) {
+        // Buscar primero en dist/assets/ (cuando está compilado)
+        candidates.push(resolveFromRoot('dist/' + logoPath, distRoot));
+        // Luego en assets/ desde la raíz del proyecto (desarrollo)
+        candidates.push(resolveFromRoot(logoPath, projectRoot));
+      } else {
+        // Ruta absoluta o relativa sin prefijo assets/
+        candidates.push(resolveFromRoot(logoPath, distRoot));
+        candidates.push(resolveFromRoot(logoPath, projectRoot));
       }
 
       for (const candidate of candidates) {
