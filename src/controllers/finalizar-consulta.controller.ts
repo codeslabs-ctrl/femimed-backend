@@ -196,6 +196,16 @@ export class FinalizarConsultaController {
           // 6. Insertar servicios de la consulta
           const serviciosInsertados: any[] = [];
           for (const servicio of serviciosProcesados) {
+            // Validar que todos los campos requeridos estén presentes
+            if (!servicio.servicio_id || !servicio.monto_pagado || !servicio.moneda) {
+              await client.query('ROLLBACK');
+              console.error('❌ Error: Faltan campos requeridos en el servicio:', servicio);
+              return res.status(400).json({ 
+                success: false, 
+                error: 'Todos los servicios deben tener servicio_id, monto_pagado y moneda' 
+              });
+            }
+            
             const insertQuery = `
               INSERT INTO servicios_consulta (consulta_id, servicio_id, monto_pagado, moneda_pago, tipo_cambio, observaciones)
               VALUES ($1, $2, $3, $4, $5, $6)
@@ -210,6 +220,24 @@ export class FinalizarConsultaController {
               servicio.observaciones || null
             ]);
             
+            // Verificar que el INSERT fue exitoso
+            if (!insertResult.rows || insertResult.rows.length === 0) {
+              await client.query('ROLLBACK');
+              console.error('❌ Error: No se pudo insertar el servicio en servicios_consulta');
+              return res.status(500).json({ 
+                success: false, 
+                error: 'Error al guardar el servicio en la base de datos' 
+              });
+            }
+            
+            console.log('✅ Servicio insertado en servicios_consulta:', {
+              id: insertResult.rows[0].id,
+              consulta_id: parseInt(id),
+              servicio_id: servicio.servicio_id,
+              monto: servicio.monto_pagado,
+              moneda: servicio.moneda
+            });
+            
             // Obtener datos del servicio asociado
             const servicioDataQuery = `
               SELECT id, nombre_servicio, monto_base, moneda 
@@ -218,11 +246,32 @@ export class FinalizarConsultaController {
             `;
             const servicioDataResult = await client.query(servicioDataQuery, [parseInt(servicio.servicio_id)]);
             
+            if (!servicioDataResult.rows || servicioDataResult.rows.length === 0) {
+              await client.query('ROLLBACK');
+              console.error('❌ Error: No se encontró el servicio con ID:', servicio.servicio_id);
+              return res.status(500).json({ 
+                success: false, 
+                error: 'Error al obtener datos del servicio' 
+              });
+            }
+            
             serviciosInsertados.push({
               ...insertResult.rows[0],
               servicios: servicioDataResult.rows[0]
             });
           }
+          
+          // Verificar que se insertaron todos los servicios
+          if (serviciosInsertados.length === 0) {
+            await client.query('ROLLBACK');
+            console.error('❌ Error: No se insertó ningún servicio');
+            return res.status(500).json({ 
+              success: false, 
+              error: 'No se pudieron insertar los servicios en la base de datos' 
+            });
+          }
+          
+          console.log('✅ Total servicios insertados en servicios_consulta:', serviciosInsertados.length);
           
           // 7. Actualizar estado de la consulta
           console.log('🔍 Actualizando estado de consulta a "finalizada"...');
@@ -251,16 +300,37 @@ export class FinalizarConsultaController {
           const totalesResult = await client.query(totalesQuery, [parseInt(id)]);
           const totales = totalesResult.rows[0] || { total_usd: 0, total_ves: 0, cantidad_servicios: 0 };
           
+          // 9. Verificar que los servicios se guardaron correctamente antes del COMMIT
+          const verificacionQuery = `
+            SELECT COUNT(*) as total
+            FROM servicios_consulta
+            WHERE consulta_id = $1
+          `;
+          const verificacionResult = await client.query(verificacionQuery, [parseInt(id)]);
+          const totalServiciosGuardados = parseInt(verificacionResult.rows[0]?.total || '0');
+          
+          if (totalServiciosGuardados !== serviciosInsertados.length) {
+            await client.query('ROLLBACK');
+            console.error('❌ Error: No se guardaron todos los servicios. Esperados:', serviciosInsertados.length, 'Guardados:', totalServiciosGuardados);
+            return res.status(500).json({ 
+              success: false, 
+              error: 'Error: No se guardaron todos los servicios correctamente' 
+            });
+          }
+          
+          console.log('✅ Verificación: Todos los servicios se guardaron correctamente en servicios_consulta');
+          
           await client.query('COMMIT');
           
-          console.log('✅ Consulta finalizada exitosamente');
+          console.log('✅ Consulta finalizada exitosamente con', serviciosInsertados.length, 'servicios guardados');
           res.json({ 
             success: true, 
             data: {
               consulta_id: parseInt(id),
               servicios: serviciosInsertados,
               totales: totales,
-              mensaje: 'Consulta finalizada exitosamente'
+              mensaje: 'Consulta finalizada exitosamente',
+              servicios_guardados: totalServiciosGuardados
             }
           });
         } catch (dbError) {

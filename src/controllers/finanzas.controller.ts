@@ -10,6 +10,11 @@ export class FinanzasController {
   static async getConsultasFinancieras(req: Request, res: Response): Promise<void> {
     try {
       const { filtros, paginacion, moneda } = req.body;
+      
+      console.log('🔍 ========== INICIO getConsultasFinancieras ==========');
+      console.log('🔍 Filtros recibidos:', JSON.stringify(filtros, null, 2));
+      console.log('🔍 Paginación:', JSON.stringify(paginacion, null, 2));
+      console.log('🔍 Moneda:', moneda);
 
       let consultas: any[] = [];
 
@@ -17,8 +22,9 @@ export class FinanzasController {
       const client = await postgresPool.connect();
       try {
         // Construir query SQL con JOINs
+        // Obtener todas las consultas finalizadas (sin DISTINCT ON ya que obtenemos servicios por separado)
           let sqlQuery = `
-            SELECT 
+            SELECT DISTINCT
               c.id,
               c.fecha_pautada,
               c.hora_pautada,
@@ -31,37 +37,27 @@ export class FinanzasController {
               p.cedula as paciente_cedula,
               m.nombres as medico_nombres,
               m.apellidos as medico_apellidos,
-              e.nombre_especialidad,
-              sc.id as servicio_consulta_id,
-              sc.monto_pagado,
-              sc.moneda_pago,
-              sc.tipo_cambio,
-              sc.observaciones as servicio_observaciones,
-              s.id as servicio_id,
-              s.nombre_servicio,
-              s.monto_base,
-              s.moneda as servicio_moneda,
-              s.descripcion as servicio_descripcion
+              e.nombre_especialidad
             FROM consultas_pacientes c
             INNER JOIN pacientes p ON c.paciente_id = p.id
             INNER JOIN medicos m ON c.medico_id = m.id
             LEFT JOIN especialidades e ON m.especialidad_id = e.id
-            LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
-            LEFT JOIN servicios s ON sc.servicio_id = s.id
-            WHERE 1=1
+            WHERE LOWER(TRIM(c.estado_consulta)) = 'finalizada'
           `;
           
+          // Agregar filtros de fecha, médico, etc.
           const params: any[] = [];
           let paramIndex = 1;
 
           // Aplicar filtros
+          // Para consultas finalizadas, usar fecha_culminacion si existe, sino fecha_pautada
           if (filtros.fecha_desde) {
-            sqlQuery += ` AND c.fecha_pautada >= $${paramIndex}`;
+            sqlQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) >= $${paramIndex}::date`;
             params.push(filtros.fecha_desde);
             paramIndex++;
           }
           if (filtros.fecha_hasta) {
-            sqlQuery += ` AND c.fecha_pautada <= $${paramIndex}`;
+            sqlQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) <= $${paramIndex}::date`;
             params.push(filtros.fecha_hasta);
             paramIndex++;
           }
@@ -83,119 +79,382 @@ export class FinanzasController {
             }
           }
 
-          sqlQuery += ` ORDER BY c.fecha_pautada DESC, c.id`;
+          sqlQuery += ` ORDER BY c.fecha_pautada DESC, c.id DESC`;
 
-          // Aplicar paginación
+          // Aplicar paginación ANTES de obtener servicios
           if (paginacion) {
             const { pagina = 1, limite = 10 } = paginacion;
             const offset = (pagina - 1) * limite;
             sqlQuery += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
             params.push(limite, offset);
+            paramIndex += 2;
           }
 
-          const result = await client.query(sqlQuery, params);
+          // Ejecutar consulta de consultas
+          console.log('🔍 SQL Query:', sqlQuery);
+          console.log('🔍 Parámetros:', params);
+          const consultasResult = await client.query(sqlQuery, params);
           
-          // Agrupar resultados por consulta
-          const consultasMap = new Map();
-          result.rows.forEach((row: any) => {
-            if (!consultasMap.has(row.id)) {
-              consultasMap.set(row.id, {
-                id: row.id,
-                fecha_pautada: row.fecha_pautada,
-                hora_pautada: row.hora_pautada,
-                estado_consulta: row.estado_consulta,
-                fecha_pago: row.fecha_pago,
-                metodo_pago: row.metodo_pago,
-                observaciones_financieras: row.observaciones_financieras,
-                paciente: {
-                  nombres: row.paciente_nombres,
-                  apellidos: row.paciente_apellidos,
-                  cedula: row.paciente_cedula
-                },
-                medico: {
-                  nombres: row.medico_nombres,
-                  apellidos: row.medico_apellidos,
-                  especialidades: {
-                    nombre_especialidad: row.nombre_especialidad
-                  }
-                },
-                servicios_consulta: []
-              });
-            }
+          console.log('📊 Consultas encontradas con estado finalizada:', consultasResult.rows.length);
+          
+          // Verificar específicamente la consulta con ID 4
+          const consulta4Query = `
+            SELECT 
+              c.id,
+              c.estado_consulta,
+              LOWER(TRIM(c.estado_consulta)) as estado_trimmed,
+              c.fecha_pautada,
+              c.fecha_culminacion,
+              c.fecha_pago,
+              COUNT(sc.id) as total_servicios,
+              STRING_AGG(sc.moneda_pago, ', ') as monedas
+            FROM consultas_pacientes c
+            LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
+            WHERE c.id = 4
+            GROUP BY c.id, c.estado_consulta, c.fecha_pautada, c.fecha_culminacion, c.fecha_pago
+          `;
+          const consulta4Result = await client.query(consulta4Query);
+          console.log('🔍 Consulta ID 4 (detalle completo):', JSON.stringify(consulta4Result.rows[0] || 'No encontrada', null, 2));
+          
+          // Verificar si pasa el filtro de estado
+          if (consulta4Result.rows[0]) {
+            const estado = consulta4Result.rows[0].estado_consulta;
+            const estadoTrimmed = consulta4Result.rows[0].estado_trimmed;
+            console.log('🔍 Estado consulta 4:', estado, '| Trimmed:', estadoTrimmed, '| Coincide con "finalizada":', estadoTrimmed === 'finalizada');
             
-            // Agregar servicio si existe
-            if (row.servicio_consulta_id) {
-              const consulta = consultasMap.get(row.id);
-              consulta.servicios_consulta.push({
-                id: row.servicio_consulta_id,
+            // Verificar filtros de fecha
+            const fechaPautada = consulta4Result.rows[0].fecha_pautada;
+            const fechaCulminacion = consulta4Result.rows[0].fecha_culminacion;
+            const fechaComparar = fechaCulminacion ? new Date(fechaCulminacion).toISOString().split('T')[0] : fechaPautada;
+            const pasaFiltroDesde = !filtros.fecha_desde || fechaComparar >= filtros.fecha_desde;
+            const pasaFiltroHasta = !filtros.fecha_hasta || fechaComparar <= filtros.fecha_hasta;
+            console.log('🔍 Fechas consulta 4:', {
+              fecha_pautada: fechaPautada,
+              fecha_culminacion: fechaCulminacion,
+              fecha_comparar: fechaComparar,
+              filtro_desde: filtros.fecha_desde,
+              filtro_hasta: filtros.fecha_hasta,
+              pasa_filtro_desde: pasaFiltroDesde,
+              pasa_filtro_hasta: pasaFiltroHasta,
+              pasa_ambos_filtros: pasaFiltroDesde && pasaFiltroHasta
+            });
+            
+            if (!pasaFiltroDesde || !pasaFiltroHasta) {
+              console.log('⚠️ Consulta 4 NO pasa los filtros de fecha');
+            } else {
+              console.log('✅ Consulta 4 SÍ pasa los filtros de fecha');
+            }
+          }
+          
+          // Verificar todas las consultas finalizadas sin filtros
+          const todasFinalizadasQuery = `
+            SELECT 
+              c.id,
+              c.estado_consulta,
+              LOWER(TRIM(c.estado_consulta)) as estado_trimmed,
+              c.fecha_pautada,
+              c.fecha_culminacion,
+              COUNT(sc.id) as total_servicios
+            FROM consultas_pacientes c
+            LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
+            WHERE LOWER(TRIM(c.estado_consulta)) = 'finalizada'
+            GROUP BY c.id, c.estado_consulta, c.fecha_pautada, c.fecha_culminacion
+            ORDER BY c.fecha_pautada DESC
+          `;
+          const todasFinalizadasResult = await client.query(todasFinalizadasQuery);
+          console.log('📊 Total consultas finalizadas en BD (sin filtros):', todasFinalizadasResult.rows.length);
+          console.log('📊 IDs de consultas finalizadas:', todasFinalizadasResult.rows.map((r: any) => ({ 
+            id: r.id, 
+            estado: r.estado_consulta,
+            estado_trimmed: r.estado_trimmed,
+            fecha_pautada: r.fecha_pautada, 
+            fecha_culminacion: r.fecha_culminacion,
+            servicios: r.total_servicios 
+          })));
+          
+          // Verificar consulta 4 específicamente con servicios
+          const serviciosConsulta4Query = `
+            SELECT 
+              sc.id,
+              sc.consulta_id,
+              sc.servicio_id,
+              sc.monto_pagado,
+              sc.moneda_pago,
+              s.nombre_servicio
+            FROM servicios_consulta sc
+            LEFT JOIN servicios s ON sc.servicio_id = s.id
+            WHERE sc.consulta_id = 4
+          `;
+          const serviciosConsulta4Result = await client.query(serviciosConsulta4Query);
+          console.log('🔍 Servicios de consulta ID 4:', serviciosConsulta4Result.rows.length, 'servicios encontrados');
+          console.log('🔍 Detalle servicios consulta 4:', JSON.stringify(serviciosConsulta4Result.rows, null, 2));
+          
+          // Obtener servicios para todas las consultas encontradas
+          const consultaIds = consultasResult.rows.map((row: any) => row.id);
+          let serviciosResult = { rows: [] };
+          
+          if (consultaIds.length > 0) {
+            const serviciosQuery = `
+              SELECT 
+                sc.consulta_id,
+                sc.id as servicio_consulta_id,
+                sc.monto_pagado,
+                sc.moneda_pago,
+                sc.tipo_cambio,
+                sc.observaciones as servicio_observaciones,
+                s.id as servicio_id,
+                s.nombre_servicio,
+                s.monto_base,
+                s.moneda as servicio_moneda,
+                s.descripcion as servicio_descripcion
+              FROM servicios_consulta sc
+              LEFT JOIN servicios s ON sc.servicio_id = s.id
+              WHERE sc.consulta_id = ANY($1::int[])
+            `;
+            serviciosResult = await client.query(serviciosQuery, [consultaIds]);
+          }
+          
+          // Crear un mapa de servicios por consulta
+          const serviciosPorConsulta = new Map();
+          serviciosResult.rows.forEach((row: any) => {
+            if (!serviciosPorConsulta.has(row.consulta_id)) {
+              serviciosPorConsulta.set(row.consulta_id, []);
+            }
+            const servicio = {
+              id: row.servicio_consulta_id,
+              monto_pagado: row.monto_pagado,
+              moneda_pago: (row.moneda_pago || 'VES').toUpperCase().trim(),
+              tipo_cambio: row.tipo_cambio,
+              observaciones: row.servicio_observaciones,
+              servicios: {
+                id: row.servicio_id,
+                nombre_servicio: row.nombre_servicio,
+                monto_base: row.monto_base,
+                moneda: row.servicio_moneda,
+                descripcion: row.servicio_descripcion
+              }
+            };
+            serviciosPorConsulta.get(row.consulta_id).push(servicio);
+            
+            // Log para consulta 4
+            if (row.consulta_id === 4) {
+              console.log('🔍 Servicio obtenido de BD para consulta 4:', {
+                consulta_id: row.consulta_id,
+                servicio_consulta_id: row.servicio_consulta_id,
                 monto_pagado: row.monto_pagado,
                 moneda_pago: row.moneda_pago,
-                tipo_cambio: row.tipo_cambio,
-                observaciones: row.servicio_observaciones,
-                servicios: {
-                  id: row.servicio_id,
-                  nombre_servicio: row.nombre_servicio,
-                  monto_base: row.monto_base,
-                  moneda: row.servicio_moneda,
-                  descripcion: row.servicio_descripcion
-                }
+                nombre_servicio: row.nombre_servicio
               });
             }
           });
-
-          consultas = Array.from(consultasMap.values());
+          
+          // Log total de servicios por consulta 4
+          const serviciosConsulta4 = serviciosPorConsulta.get(4) || [];
+          if (serviciosConsulta4.length > 0) {
+            console.log('📊 Total servicios obtenidos para consulta 4:', serviciosConsulta4.length);
+            console.log('📊 Servicios consulta 4:', serviciosConsulta4.map((s: any) => ({
+              monto: s.monto_pagado,
+              moneda: s.moneda_pago
+            })));
+          } else {
+            console.log('⚠️ No se encontraron servicios para consulta 4');
+          }
+          
+          if (consultasResult.rows.length > 0) {
+            console.log('📊 Primera consulta:', {
+              id: consultasResult.rows[0].id,
+              estado: consultasResult.rows[0].estado_consulta,
+              tiene_servicios: (serviciosPorConsulta.get(consultasResult.rows[0].id)?.length || 0) > 0
+            });
+          }
+          
+          // Convertir el resultado a formato de consultas
+          consultas = consultasResult.rows.map((row: any) => ({
+            id: row.id,
+            fecha_pautada: row.fecha_pautada,
+            hora_pautada: row.hora_pautada,
+            estado_consulta: row.estado_consulta,
+            fecha_pago: row.fecha_pago,
+            metodo_pago: row.metodo_pago,
+            observaciones_financieras: row.observaciones_financieras,
+            paciente: {
+              nombres: row.paciente_nombres,
+              apellidos: row.paciente_apellidos,
+              cedula: row.paciente_cedula
+            },
+            medico: {
+              nombres: row.medico_nombres,
+              apellidos: row.medico_apellidos,
+              especialidades: {
+                nombre_especialidad: row.nombre_especialidad
+              }
+            },
+            servicios_consulta: serviciosPorConsulta.get(row.id) || []
+          }));
+          
+          // Verificar si la consulta 4 está en la lista después de obtener servicios
+          const consulta4EnLista = consultas.find((c: any) => c.id === 4);
+          console.log('🔍 Consulta 4 después de obtener servicios:', consulta4EnLista ? {
+            id: consulta4EnLista.id,
+            estado: consulta4EnLista.estado_consulta,
+            total_servicios: consulta4EnLista.servicios_consulta?.length || 0,
+            servicios: consulta4EnLista.servicios_consulta?.map((s: any) => ({ moneda: s.moneda_pago, monto: s.monto_pagado }))
+          } : 'NO ENCONTRADA');
+          
+          console.log('📊 IDs de consultas obtenidas:', consultas.map((c: any) => c.id));
         } finally {
           client.release();
         }
 
       // Filtrar consultas por moneda si se especifica
       let consultasFiltradas = consultas || [];
+      console.log('📊 Total consultas antes de filtrar por moneda:', consultasFiltradas.length);
+      console.log('📊 IDs antes de filtrar por moneda:', consultasFiltradas.map((c: any) => c.id));
+      
       if (moneda && moneda !== 'TODAS') {
         consultasFiltradas = consultasFiltradas.filter((consulta: any) => {
+          // Si la consulta no tiene servicios, no la incluimos cuando se filtra por moneda específica
+          if (!consulta.servicios_consulta || consulta.servicios_consulta.length === 0) {
+            if (consulta.id === 4) {
+              console.log('❌ Consulta 4 eliminada: no tiene servicios');
+            }
+            return false;
+          }
           // Verificar si la consulta tiene al menos un servicio con la moneda especificada
-          const tieneServicioConMoneda = consulta.servicios_consulta?.some((servicio: any) => 
-            servicio.moneda_pago === moneda
-          );
+          const tieneServicioConMoneda = consulta.servicios_consulta?.some((servicio: any) => {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            const monedaFiltro = moneda.toUpperCase().trim();
+            return monedaServicio === monedaFiltro;
+          });
+          if (consulta.id === 4) {
+            console.log('🔍 Consulta 4 - Tiene servicios:', consulta.servicios_consulta.length);
+            console.log('🔍 Consulta 4 - Monedas:', consulta.servicios_consulta.map((s: any) => s.moneda_pago));
+            console.log('🔍 Consulta 4 - Moneda filtro:', moneda);
+            console.log('🔍 Consulta 4 - Pasa filtro:', tieneServicioConMoneda);
+          }
           return tieneServicioConMoneda;
         });
+        console.log('📊 Consultas después de filtrar por moneda', moneda, ':', consultasFiltradas.length);
+        console.log('📊 IDs después de filtrar por moneda:', consultasFiltradas.map((c: any) => c.id));
+      } else {
+        // Si es "TODAS", incluir todas las consultas finalizadas, incluso sin servicios
+        console.log('📊 Mostrando todas las monedas, incluyendo consultas sin servicios');
+        // Asegurarnos de que las consultas sin servicios también se incluyan
+        // (ya están incluidas porque no las filtramos)
       }
 
 
       // Transformar datos para el frontend
       const consultasTransformadas = consultasFiltradas?.map((consulta: any) => {
-        // Calcular total de la consulta sumando servicios (se actualizará después del filtro)
-
         // Filtrar servicios por moneda si se especifica
         let serviciosFiltrados = consulta.servicios_consulta || [];
+        
+        if (consulta.id === 4) {
+          console.log('🔍 Antes de filtrar servicios - Consulta 4:', {
+            total_servicios: serviciosFiltrados.length,
+            servicios: serviciosFiltrados.map((s: any) => ({
+              monto: s.monto_pagado,
+              moneda: s.moneda_pago
+            })),
+            moneda_filtro: moneda
+          });
+        }
+        
         if (moneda && moneda !== 'TODAS') {
-          serviciosFiltrados = serviciosFiltrados.filter((servicio: any) => 
-            servicio.moneda_pago === moneda
-          );
+          serviciosFiltrados = serviciosFiltrados.filter((servicio: any) => {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            const monedaFiltro = moneda.toUpperCase().trim();
+            return monedaServicio === monedaFiltro;
+          });
+          
+          if (consulta.id === 4) {
+            console.log('🔍 Después de filtrar servicios - Consulta 4:', {
+              total_servicios_filtrados: serviciosFiltrados.length,
+              servicios_filtrados: serviciosFiltrados.map((s: any) => ({
+                monto: s.monto_pagado,
+                moneda: s.moneda_pago
+              }))
+            });
+          }
         }
 
+        // Función auxiliar para parsear valores numéricos
+        const parsearNumero = (valor: any): number => {
+          if (valor === null || valor === undefined) return 0;
+          if (typeof valor === 'number') return valor;
+          if (typeof valor === 'string') {
+            const limpio = valor.trim().replace(/[^\d.,-]/g, '');
+            return parseFloat(limpio.replace(',', '.')) || 0;
+          }
+          return Number(valor) || 0;
+        };
+        
         // Calcular total de la consulta sumando solo los servicios filtrados
+        console.log(`🔍 Calculando total para consulta ${consulta.id}:`, {
+          total_servicios_originales: consulta.servicios_consulta?.length || 0,
+          total_servicios_filtrados: serviciosFiltrados.length,
+          moneda_filtro: moneda,
+          servicios_filtrados: serviciosFiltrados.map((s: any) => ({
+            id: s.id,
+            monto_pagado: s.monto_pagado,
+            monto_pagado_tipo: typeof s.monto_pagado,
+            moneda: s.moneda_pago
+          }))
+        });
+        
         const totalConsulta = serviciosFiltrados.reduce((sum: number, servicio: any) => {
-          return sum + (servicio.monto_pagado || 0);
+          const monto = parsearNumero(servicio.monto_pagado);
+          const nuevaSuma = sum + monto;
+          
+          if (consulta.id === 4) {
+            console.log('💰 Servicio para consulta 4:', {
+              servicio_id: servicio.id,
+              monto_pagado_original: servicio.monto_pagado,
+              monto_pagado_tipo: typeof servicio.monto_pagado,
+              monto_parseado: monto,
+              moneda: servicio.moneda_pago,
+              suma_anterior: sum,
+              nueva_suma: nuevaSuma
+            });
+          }
+          
+          return nuevaSuma;
         }, 0);
+        
+        console.log(`💰 Total calculado para consulta ${consulta.id}:`, {
+          total_servicios: serviciosFiltrados.length,
+          total_consulta: totalConsulta,
+          total_consulta_tipo: typeof totalConsulta,
+          moneda_filtro: moneda
+        });
 
-        // Transformar servicios para el frontend
-        const serviciosTransformados = serviciosFiltrados.map((servicio: any) => ({
-          id: servicio.id,
-          nombre_servicio: (servicio.servicios as any)?.nombre_servicio || '',
-          descripcion: (servicio.servicios as any)?.descripcion || '',
-          precio_unitario: (servicio.servicios as any)?.monto_base || 0,
-          cantidad: 1, // Por defecto 1 servicio
-          subtotal: servicio.monto_pagado,
-          descuento: 0, // Por defecto sin descuento
-          total_servicio: servicio.monto_pagado,
-          moneda_pago: servicio.moneda_pago,
-          tipo_cambio: servicio.tipo_cambio,
-          observaciones: servicio.observaciones
-        }));
+        // Transformar servicios para el frontend (usando la función parsearNumero definida arriba)
+        const serviciosTransformados = serviciosFiltrados.map((servicio: any) => {
+          const montoPagado = parsearNumero(servicio.monto_pagado);
+          const montoBase = parsearNumero((servicio.servicios as any)?.monto_base);
+          
+          return {
+            id: servicio.id,
+            nombre_servicio: (servicio.servicios as any)?.nombre_servicio || '',
+            descripcion: (servicio.servicios as any)?.descripcion || '',
+            precio_unitario: montoBase,
+            cantidad: 1, // Por defecto 1 servicio
+            subtotal: montoPagado,
+            descuento: 0, // Por defecto sin descuento
+            total_servicio: montoPagado,
+            moneda_pago: servicio.moneda_pago || 'VES',
+            tipo_cambio: servicio.tipo_cambio,
+            observaciones: servicio.observaciones
+          };
+        });
 
         // Determinar la moneda principal de los servicios filtrados
-        const monedas = serviciosFiltrados.map((s: any) => s.moneda_pago);
-        const monedaPrincipal = monedas.length > 0 ? monedas[0] : 'COP';
+        // Si no hay servicios, usar VES por defecto
+        const monedas = serviciosFiltrados.map((s: any) => s.moneda_pago).filter(Boolean);
+        const monedaPrincipal = monedas.length > 0 ? monedas[0] : 'VES';
+        
+        // Asegurar que totalConsulta sea un número válido
+        const totalConsultaFinal = isNaN(totalConsulta) ? 0 : totalConsulta;
 
         return {
           id: consulta.id,
@@ -209,8 +468,8 @@ export class FinanzasController {
           hora_consulta: consulta.hora_pautada,
           estado_consulta: consulta.fecha_pago ? 'pagado' : 'pendiente',
           servicios: serviciosTransformados,
-          total_consulta: totalConsulta,
-          moneda_principal: monedaPrincipal,
+          total_consulta: totalConsultaFinal,
+          moneda_principal: monedaPrincipal || 'VES',
           fecha_pago: consulta.fecha_pago,
           metodo_pago: consulta.metodo_pago,
           observaciones_financieras: consulta.observaciones_financieras
@@ -227,19 +486,19 @@ export class FinanzasController {
             SELECT COUNT(DISTINCT c.id)
             FROM consultas_pacientes c
             INNER JOIN pacientes p ON c.paciente_id = p.id
-            WHERE 1=1
+            WHERE LOWER(TRIM(c.estado_consulta)) = 'finalizada'
           `;
           
           const params: any[] = [];
           let paramIndex = 1;
 
           if (filtros.fecha_desde) {
-            countQuery += ` AND c.fecha_pautada >= $${paramIndex}`;
+            countQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) >= $${paramIndex}::date`;
             params.push(filtros.fecha_desde);
             paramIndex++;
           }
           if (filtros.fecha_hasta) {
-            countQuery += ` AND c.fecha_pautada <= $${paramIndex}`;
+            countQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) <= $${paramIndex}::date`;
             params.push(filtros.fecha_hasta);
             paramIndex++;
           }
@@ -289,13 +548,19 @@ export class FinanzasController {
         tiene_anterior: (paginacion.pagina || 1) > 1
       } : null;
 
+      console.log('🔍 ========== FIN getConsultasFinancieras ==========');
+      console.log('🔍 Total consultas transformadas:', consultasTransformadas.length);
+      console.log('🔍 IDs de consultas en respuesta:', consultasTransformadas.map((c: any) => c.id));
+      console.log('🔍 Consulta 4 en respuesta:', consultasTransformadas.find((c: any) => c.id === 4) ? 'SÍ' : 'NO');
+      
       res.json({
         success: true,
         data: consultasTransformadas,
         paginacion: paginacionInfo
       } as ApiResponse<any>);
     } catch (error) {
-      console.error('Error in getConsultasFinancieras:', error);
+      console.error('❌ Error in getConsultasFinancieras:', error);
+      console.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
       res.status(500).json({
         success: false,
         error: { message: 'Error interno del servidor' }
@@ -327,20 +592,21 @@ export class FinanzasController {
           INNER JOIN medicos m ON c.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
           LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
-          WHERE 1=1
+          WHERE LOWER(TRIM(c.estado_consulta)) = 'finalizada'
         `;
         
         const params: any[] = [];
         let paramIndex = 1;
 
         // Aplicar filtros de fecha
+        // Para consultas finalizadas, usar fecha_culminacion si existe, sino fecha_pautada
         if (filtros.fecha_desde) {
-          sqlQuery += ` AND c.fecha_pautada >= $${paramIndex}`;
+          sqlQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) >= $${paramIndex}::date`;
           params.push(filtros.fecha_desde);
           paramIndex++;
         }
         if (filtros.fecha_hasta) {
-          sqlQuery += ` AND c.fecha_pautada <= $${paramIndex}`;
+          sqlQuery += ` AND COALESCE(c.fecha_culminacion::date, c.fecha_pautada) <= $${paramIndex}::date`;
           params.push(filtros.fecha_hasta);
           paramIndex++;
         }
@@ -375,7 +641,7 @@ export class FinanzasController {
             const consulta = consultasMap.get(row.id);
             consulta.servicios_consulta.push({
               monto_pagado: row.monto_pagado,
-              moneda_pago: row.moneda_pago
+              moneda_pago: (row.moneda_pago || 'VES').toUpperCase().trim()
             });
           }
         });
@@ -385,11 +651,26 @@ export class FinanzasController {
         client.release();
       }
 
+      // Función auxiliar para parsear valores numéricos
+      const parsearNumero = (valor: any): number => {
+        if (valor === null || valor === undefined) return 0;
+        if (typeof valor === 'number') return valor;
+        if (typeof valor === 'string') {
+          const limpio = valor.trim().replace(/[^\d.,-]/g, '');
+          return parseFloat(limpio.replace(',', '.')) || 0;
+        }
+        return Number(valor) || 0;
+      };
+
       // Aplicar filtro de moneda post-query
       let consultasFiltradas = consultas || [];
       if (moneda && moneda !== 'TODAS') {
+        const monedaFiltro = moneda.toUpperCase().trim();
         consultasFiltradas = consultas?.filter((consulta: any) => 
-          consulta.servicios_consulta?.some((servicio: any) => servicio.moneda_pago === moneda)
+          consulta.servicios_consulta?.some((servicio: any) => {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            return monedaServicio === monedaFiltro;
+          })
         ) || [];
       }
 
@@ -400,10 +681,15 @@ export class FinanzasController {
       const totalIngresos = consultasFiltradas.reduce((sum: number, consulta: any) => {
         const totalConsulta = consulta.servicios_consulta?.reduce((servicioSum: number, servicio: any) => {
           // Solo sumar servicios de la moneda seleccionada
-          if (moneda && moneda !== 'TODAS' && servicio.moneda_pago !== moneda) {
-            return servicioSum;
+          if (moneda && moneda !== 'TODAS') {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            const monedaFiltro = moneda.toUpperCase().trim();
+            if (monedaServicio !== monedaFiltro) {
+              return servicioSum;
+            }
           }
-          return servicioSum + (servicio.monto_pagado || 0);
+          const monto = parsearNumero(servicio.monto_pagado);
+          return servicioSum + monto;
         }, 0) || 0;
         return sum + totalConsulta;
       }, 0);
@@ -417,10 +703,15 @@ export class FinanzasController {
         const especialidad = (consulta.medico as any)?.especialidades?.nombre_especialidad || 'Sin especialidad';
         const totalConsulta = consulta.servicios_consulta?.reduce((sum: number, servicio: any) => {
           // Solo sumar servicios de la moneda seleccionada
-          if (moneda && moneda !== 'TODAS' && servicio.moneda_pago !== moneda) {
-            return sum;
+          if (moneda && moneda !== 'TODAS') {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            const monedaFiltro = moneda.toUpperCase().trim();
+            if (monedaServicio !== monedaFiltro) {
+              return sum;
+            }
           }
-          return sum + (servicio.monto_pagado || 0);
+          const monto = parsearNumero(servicio.monto_pagado);
+          return sum + monto;
         }, 0) || 0;
         totalPorEspecialidad[especialidad] = (totalPorEspecialidad[especialidad] || 0) + totalConsulta;
       });
@@ -431,10 +722,15 @@ export class FinanzasController {
         const medico = `${(consulta.medico as any)?.nombres || ''} ${(consulta.medico as any)?.apellidos || ''}`.trim() || 'Sin médico';
         const totalConsulta = consulta.servicios_consulta?.reduce((sum: number, servicio: any) => {
           // Solo sumar servicios de la moneda seleccionada
-          if (moneda && moneda !== 'TODAS' && servicio.moneda_pago !== moneda) {
-            return sum;
+          if (moneda && moneda !== 'TODAS') {
+            const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
+            const monedaFiltro = moneda.toUpperCase().trim();
+            if (monedaServicio !== monedaFiltro) {
+              return sum;
+            }
           }
-          return sum + (servicio.monto_pagado || 0);
+          const monto = parsearNumero(servicio.monto_pagado);
+          return sum + monto;
         }, 0) || 0;
         totalPorMedico[medico] = (totalPorMedico[medico] || 0) + totalConsulta;
       });
@@ -442,18 +738,27 @@ export class FinanzasController {
       // Calcular estadísticas por moneda
       const estadisticasPorMoneda: { [key: string]: any } = {};
       const monedas = [...new Set(consultas?.flatMap((c: any) => 
-        c.servicios_consulta?.map((s: any) => s.moneda_pago).filter(Boolean) || []
+        c.servicios_consulta?.map((s: any) => (s.moneda_pago || 'VES').toUpperCase().trim()).filter(Boolean) || []
       ) || [])];
 
       monedas.forEach(monedaItem => {
+        const monedaItemNormalizada = monedaItem.toUpperCase().trim();
         const consultasMoneda = consultas?.filter((consulta: any) => 
-          consulta.servicios_consulta?.some((servicio: any) => servicio.moneda_pago === monedaItem)
+          consulta.servicios_consulta?.some((servicio: any) => {
+            const monedaServicio = (servicio.moneda_pago || 'VES').toUpperCase().trim();
+            return monedaServicio === monedaItemNormalizada;
+          })
         ) || [];
 
         const totalConsultasMoneda = consultasMoneda.length;
         const totalIngresosMoneda = consultasMoneda.reduce((sum: number, consulta: any) => {
           const totalConsulta = consulta.servicios_consulta?.reduce((servicioSum: number, servicio: any) => {
-            return servicioSum + (servicio.moneda_pago === monedaItem ? (servicio.monto_pagado || 0) : 0);
+            const monedaServicio = (servicio.moneda_pago || 'VES').toUpperCase().trim();
+            if (monedaServicio === monedaItemNormalizada) {
+              const monto = parsearNumero(servicio.monto_pagado);
+              return servicioSum + monto;
+            }
+            return servicioSum;
           }, 0) || 0;
           return sum + totalConsulta;
         }, 0);
@@ -592,7 +897,7 @@ export class FinanzasController {
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
           LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
           LEFT JOIN servicios s ON sc.servicio_id = s.id
-          WHERE 1=1
+          WHERE c.estado_consulta = 'finalizada'
         `;
         
         const params: any[] = [];
@@ -832,7 +1137,7 @@ export class FinanzasController {
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
           LEFT JOIN servicios_consulta sc ON c.id = sc.consulta_id
           LEFT JOIN servicios s ON sc.servicio_id = s.id
-          WHERE 1=1
+          WHERE c.estado_consulta = 'finalizada'
         `;
         
         const params: any[] = [];
