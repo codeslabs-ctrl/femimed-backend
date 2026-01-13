@@ -56,7 +56,10 @@ export const config: Config = {
     user: process.env['EMAIL_USER'] || '',
     password: process.env['EMAIL_PASSWORD'] || '',
     service: process.env['EMAIL_SERVICE'] || 'gmail',
-    from: process.env['EMAIL_FROM'] || 'FemiMed <codes.labs.rc@gmail.com>'
+    from: process.env['EMAIL_FROM'] || 'FemiMed <codes.labs.rc@gmail.com>',
+    host: process.env['EMAIL_HOST'] || '',
+    ...(process.env['EMAIL_PORT'] ? { port: parseInt(process.env['EMAIL_PORT']) } : {}),
+    secure: process.env['EMAIL_SECURE'] === 'true' || false
   },
   
   // System configuration

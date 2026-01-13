@@ -30,14 +30,51 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
-    // Configuración del transporter
-    this.transporter = nodemailer.createTransport({
-      service: config.email.service,
+    // Logging de configuración de email (sin mostrar la contraseña completa)
+    console.log('📧 Configuración de Email al inicializar:');
+    console.log('  - Archivo de config cargado:', process.env['NODE_ENV'] === 'production' ? 'config.env' : 'config.dev.env');
+    console.log('  - NODE_ENV:', process.env['NODE_ENV']);
+    console.log('  - EMAIL_USER:', config.email.user || 'NO CONFIGURADO');
+    console.log('  - EMAIL_PASSWORD:', config.email.password ? `${config.email.password.substring(0, 4)}***${config.email.password.substring(config.email.password.length - 2)} (${config.email.password.length} caracteres)` : 'NO CONFIGURADO');
+    console.log('  - EMAIL_SERVICE:', config.email.service);
+    console.log('  - EMAIL_FROM:', config.email.from);
+    console.log('  - EMAIL_HOST:', config.email.host || 'NO CONFIGURADO (usará default del servicio)');
+    console.log('  - EMAIL_PORT:', config.email.port || 'NO CONFIGURADO (usará default del servicio)');
+    console.log('  - EMAIL_SECURE:', config.email.secure);
+    
+    // Configuración del transporter basada en variables de entorno
+    const transporterConfig: any = {
       auth: {
         user: config.email.user,
         pass: config.email.password
       }
-    });
+    };
+
+    // Si hay host configurado, usar configuración manual
+    if (config.email.host) {
+      transporterConfig.host = config.email.host;
+      transporterConfig.port = config.email.port || 587;
+      transporterConfig.secure = config.email.secure;
+      transporterConfig.tls = {
+        rejectUnauthorized: false
+      };
+    } else {
+      // Usar configuración por servicio (gmail, outlook, etc.)
+      transporterConfig.service = config.email.service;
+    }
+
+    this.transporter = nodemailer.createTransport(transporterConfig);
+    
+      // Verificar la conexión al crear el transporter (solo en desarrollo)
+      if (config.nodeEnv === 'development') {
+        this.transporter.verify((error) => {
+          if (error) {
+            console.error('❌ Error verificando configuración de email:', error);
+          } else {
+            console.log('✅ Configuración de email verificada correctamente');
+          }
+        });
+      }
   }
 
   /**
@@ -48,12 +85,27 @@ export class EmailService {
       console.log('📧 EmailService - Configuración:');
       console.log('  - Service:', config.email.service);
       console.log('  - User:', config.email.user);
-      console.log('  - From:', config.email.from);
+      console.log('  - From (original):', config.email.from);
       console.log('  - To:', options.to);
       console.log('  - Subject:', options.subject);
       
+      // Para Gmail, el campo "from" debe ser el email del usuario autenticado
+      // Si hay un formato personalizado, extraer solo el email o usar el user directamente
+      let fromEmail = config.email.from;
+      if (config.email.service === 'gmail') {
+        // Si el from tiene formato "Nombre <email>", extraer solo el email
+        const emailMatch = config.email.from.match(/<(.+)>/);
+        if (emailMatch && emailMatch[1]) {
+          fromEmail = emailMatch[1];
+        } else if (!config.email.from.includes('@')) {
+          // Si no tiene @, usar el user directamente
+          fromEmail = config.email.user || config.email.from;
+        }
+        console.log('  - From (procesado para Gmail):', fromEmail);
+      }
+      
       const mailOptions = {
-        from: config.email.from,
+        from: fromEmail,
         to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
         subject: options.subject,
         html: options.html,
@@ -65,11 +117,69 @@ export class EmailService {
         priority: options.priority
       };
 
-      const result = await this.transporter.sendMail(mailOptions);
-      console.log('✅ Email enviado exitosamente:', result.messageId);
-      return true;
-    } catch (error) {
-      console.error('❌ Error enviando email:', error);
+      console.log('📧 Intentando enviar email con opciones:', {
+        from: mailOptions.from,
+        to: mailOptions.to,
+        subject: mailOptions.subject,
+        hasHtml: !!mailOptions.html,
+        hasText: !!mailOptions.text,
+        htmlLength: mailOptions.html?.length || 0,
+        textLength: mailOptions.text?.length || 0
+      });
+
+      console.log('📧 Transporter config:', {
+        service: config.email.service,
+        host: config.email.host || 'default',
+        port: config.email.port || 'default',
+        secure: config.email.secure,
+        user: config.email.user ? '***configurado***' : 'NO CONFIGURADO'
+      });
+
+      try {
+        const result = await this.transporter.sendMail(mailOptions);
+        console.log('✅ Email enviado exitosamente:', result.messageId);
+        console.log('✅ Respuesta completa:', JSON.stringify(result, null, 2));
+        return true;
+      } catch (sendError: any) {
+        console.error('❌ ERROR DETALLADO AL ENVIAR EMAIL:');
+        console.error('  ============================================');
+        console.error('  - Tipo de error:', typeof sendError);
+        console.error('  - Es instancia de Error:', sendError instanceof Error);
+        console.error('  - Mensaje:', sendError?.message);
+        console.error('  - Código:', sendError?.code);
+        console.error('  - Response Code:', sendError?.responseCode);
+        console.error('  - Response:', sendError?.response);
+        console.error('  - Command:', sendError?.command);
+        console.error('  - Error completo (JSON):', JSON.stringify(sendError, Object.getOwnPropertyNames(sendError), 2));
+        console.error('  - Stack completo:');
+        console.error(sendError?.stack);
+        console.error('  - Todas las propiedades del error:');
+        console.error(Object.keys(sendError));
+        console.error('  ============================================');
+        throw sendError; // Re-lanzar para que el catch externo lo capture
+      }
+    } catch (error: any) {
+      console.error('❌ ERROR EN CATCH EXTERNO:');
+      console.error('  ============================================');
+      console.error('  - Tipo de error:', typeof error);
+      console.error('  - Es instancia de Error:', error instanceof Error);
+      console.error('  - Mensaje:', error?.message);
+      console.error('  - Código:', error?.code);
+      console.error('  - Response Code:', error?.responseCode);
+      console.error('  - Response:', error?.response);
+      console.error('  - Command:', error?.command);
+      console.error('  - Error completo (JSON):', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+      console.error('  - Stack completo:');
+      console.error(error?.stack);
+      console.error('  - Todas las propiedades del error:');
+      console.error(Object.keys(error));
+      if (error?.response) {
+        console.error('  - Response (string):', String(error.response));
+      }
+      if (error?.command) {
+        console.error('  - Command details:', error.command);
+      }
+      console.error('  ============================================');
       return false;
     }
   }
@@ -116,8 +226,10 @@ export class EmailService {
 
       console.log('📧 sendTemplateEmail - Resultado:', result);
       return result;
-    } catch (error) {
-      console.error('❌ Error procesando template de email:', error);
+    } catch (error: any) {
+      console.error('❌ Error procesando template de email:');
+      console.error('  - Mensaje:', error?.message);
+      console.error('  - Stack:', error?.stack);
       return false;
     }
   }

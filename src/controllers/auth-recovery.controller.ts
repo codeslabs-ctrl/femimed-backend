@@ -45,6 +45,12 @@ export class AuthRecoveryController {
       // Generar OTP (8 dígitos)
       const otp = Math.floor(10000000 + Math.random() * 90000000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+      
+      console.log('🔐 OTP generado para recuperación de contraseña:');
+      console.log('  - Email:', email);
+      console.log('  - Usuario ID:', usuario.id);
+      console.log('  - OTP:', otp);
+      console.log('  - Expira en:', expiresAt.toISOString());
 
       // Guardar OTP en la base de datos (PostgreSQL)
       const otpClient = await postgresPool.connect();
@@ -99,12 +105,19 @@ export class AuthRecoveryController {
         data: { message: 'Código de recuperación enviado a su email' }
       } as ApiResponse<{ message: string }>);
 
-    } catch (error) {
-      console.error('Error in requestPasswordRecovery:', error);
-      res.status(500).json({
-        success: false,
-        error: { message: 'Error interno del servidor' }
-      } as ApiResponse<null>);
+    } catch (error: any) {
+      console.error('❌ Error in requestPasswordRecovery:');
+      console.error('  - Mensaje:', error?.message);
+      console.error('  - Stack:', error?.stack);
+      console.error('  - Error completo:', error);
+      
+      // Si la respuesta ya fue enviada, no intentar enviar otra
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: { message: 'Error interno del servidor' }
+        } as ApiResponse<null>);
+      }
     }
   }
 

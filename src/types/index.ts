@@ -57,6 +57,9 @@ export interface Config {
     password: string;
     service: string;
     from: string;
+    host: string;
+    port?: number;
+    secure: boolean;
   };
   sistema: {
     nombre: string;
