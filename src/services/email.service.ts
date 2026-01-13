@@ -89,9 +89,10 @@ export class EmailService {
       console.log('  - To:', options.to);
       console.log('  - Subject:', options.subject);
       
-      // Para Gmail, el campo "from" debe ser el email del usuario autenticado
-      // Si hay un formato personalizado, extraer solo el email o usar el user directamente
+      // Procesar el campo "from" según el servicio de email
       let fromEmail = config.email.from;
+      
+      // Para Gmail, el campo "from" debe ser el email del usuario autenticado
       if (config.email.service === 'gmail') {
         // Si el from tiene formato "Nombre <email>", extraer solo el email
         const emailMatch = config.email.from.match(/<(.+)>/);
@@ -102,6 +103,19 @@ export class EmailService {
           fromEmail = config.email.user || config.email.from;
         }
         console.log('  - From (procesado para Gmail):', fromEmail);
+      } else if (config.email.host) {
+        // Para SendGrid u otros SMTP personalizados, mantener el formato "Nombre <email>"
+        // pero asegurarse de que el email esté presente
+        const emailMatch = config.email.from.match(/<(.+)>/);
+        if (emailMatch && emailMatch[1]) {
+          // Ya tiene formato correcto, mantenerlo
+          fromEmail = config.email.from;
+        } else if (!config.email.from.includes('@')) {
+          // Si no tiene formato correcto, intentar construir uno
+          console.warn('⚠️ Campo EMAIL_FROM no tiene formato correcto para SendGrid. Debe ser: "Nombre <email@dominio.com>"');
+          fromEmail = config.email.from;
+        }
+        console.log('  - From (procesado para SMTP personalizado):', fromEmail);
       }
       
       const mailOptions = {

@@ -77,23 +77,40 @@ export class AuthRecoveryController {
       console.log('  - Email:', usuario.email);
       console.log('  - OTP generado:', otp);
       
-      const emailService = new EmailService();
-      const emailSent = await emailService.sendPasswordRecoveryOTP(
-        usuario.email,
-        {
-          nombre: usuario.username,
-          otp: otp,
-          expiresIn: '15 minutos'
+      try {
+        const emailService = new EmailService();
+        const emailSent = await emailService.sendPasswordRecoveryOTP(
+          usuario.email,
+          {
+            nombre: usuario.username,
+            otp: otp,
+            expiresIn: '15 minutos'
+          }
+        );
+
+        console.log('📧 Resultado del envío de email:', emailSent);
+
+        if (!emailSent) {
+          console.error('❌ Error sending recovery email - sendPasswordRecoveryOTP retornó false');
+          res.status(500).json({
+            success: false,
+            error: { message: 'Error enviando email de recuperación' }
+          } as ApiResponse<null>);
+          return;
         }
-      );
-
-      console.log('📧 Resultado del envío de email:', emailSent);
-
-      if (!emailSent) {
-        console.error('❌ Error sending recovery email');
+      } catch (emailError: any) {
+        console.error('❌ ERROR AL ENVIAR EMAIL DE RECUPERACIÓN:');
+        console.error('  - Tipo:', typeof emailError);
+        console.error('  - Mensaje:', emailError?.message);
+        console.error('  - Código:', emailError?.code);
+        console.error('  - Response Code:', emailError?.responseCode);
+        console.error('  - Response:', emailError?.response);
+        console.error('  - Stack:', emailError?.stack);
+        console.error('  - Error completo:', JSON.stringify(emailError, Object.getOwnPropertyNames(emailError), 2));
+        
         res.status(500).json({
           success: false,
-          error: { message: 'Error enviando email de recuperación' }
+          error: { message: 'Error enviando email de recuperación: ' + (emailError?.message || 'Error desconocido') }
         } as ApiResponse<null>);
         return;
       }
