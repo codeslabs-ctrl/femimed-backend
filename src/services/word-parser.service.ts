@@ -21,6 +21,7 @@ export interface ParsedHistoriaData {
   antecedentes_otros?: string;
   examen_fisico?: string;
   ultrasonido?: string;
+  examenes_medico?: string; // Exámenes médicos consolidados
   diagnostico?: string;
   conclusiones?: string;
   plan?: string;
@@ -305,100 +306,71 @@ export class WordParserService {
       historia.motivo_consulta = motivoMatch[1].trim();
     }
 
-    // Extraer antecedentes personales
-    const antecedentesPersonalesMatch = fullText.match(/ANTECEDENTES\s+PERSONALES\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
-    if (antecedentesPersonalesMatch && antecedentesPersonalesMatch[1]) {
-      historia.antecedentes_personales = antecedentesPersonalesMatch[1].trim();
-    }
-
-    // Extraer antecedentes familiares
-    const antecedentesFamiliaresMatch = fullText.match(/ANTECEDENTES\s+FAMILIARES\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
-    if (antecedentesFamiliaresMatch && antecedentesFamiliaresMatch[1]) {
-      historia.antecedentes_familiares = antecedentesFamiliaresMatch[1].trim();
-    }
-
-    // Extraer antecedentes quirúrgicos
-    const antecedentesQuirurgicosMatch = fullText.match(/ANTECEDENTES\s+QUIRURGICOS?\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
-    if (antecedentesQuirurgicosMatch && antecedentesQuirurgicosMatch[1]) {
-      historia.antecedentes_quirurgicos = antecedentesQuirurgicosMatch[1].trim();
-    }
-
-    // Extraer antecedentes otros: cualquier sección ANTECEDENTES que NO sea PERSONALES, FAMILIARES o QUIRURGICOS
-    // Esto incluye: GINECOOBSTETRICOS, PATOLOGICOS, ALERGICOS, etc.
-    const antecedentesOtrosSections: string[] = [];
-    
-    // Buscar todas las secciones que empiecen con "ANTECEDENTES" seguido de cualquier palabra
-    // y luego filtrar las que NO sean PERSONALES, FAMILIARES o QUIRURGICOS
-    // Mejorado: usar un patrón más robusto que capture el tipo completo y el contenido
+    // CONSOLIDAR TODOS LOS ANTECEDENTES EN antecedentes_otros
+    // Buscar todas las secciones que empiecen con "ANTECEDENTES" (cualquier tipo)
     const allAntecedentesRegex = /ANTECEDENTES\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*)\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO|Ultrasonido)[^\n]+)*)/gi;
+    const antecedentesSections: string[] = [];
     let match;
+    
     while ((match = allAntecedentesRegex.exec(fullText)) !== null) {
       const tipoAntecedente = match[1]?.trim();
       const contenido = match[2]?.trim();
       
-      // Debug: log para ver qué se está capturando
-      console.log(`[WordParser] Antecedentes encontrado - Tipo: "${tipoAntecedente}", Contenido: "${contenido?.substring(0, 50)}..."`);
-      
-      // Solo agregar si tiene contenido y NO es una de las secciones ya procesadas
       if (tipoAntecedente && contenido) {
-        const tipoNormalizado = tipoAntecedente.toUpperCase().trim();
-        // Excluir PERSONALES, FAMILIARES, QUIRURGICOS (ya procesados arriba)
-        if (!tipoNormalizado.match(/^(PERSONALES|FAMILIARES|QUIRURGICOS)$/i)) {
-          console.log(`[WordParser] Agregando a antecedentes_otros: "${tipoAntecedente}"`);
-          antecedentesOtrosSections.push(`${tipoAntecedente}: ${contenido}`);
-        }
+        console.log(`[WordParser] Antecedentes encontrado - Tipo: "${tipoAntecedente}", Contenido: "${contenido?.substring(0, 50)}..."`);
+        antecedentesSections.push(`${tipoAntecedente}: ${contenido}`);
       }
     }
     
-    // Si hay secciones encontradas, combinarlas en antecedentes_otros
-    if (antecedentesOtrosSections.length > 0) {
-      historia.antecedentes_otros = antecedentesOtrosSections.join('\n\n');
-    }
-    
-    // También buscar explícitamente "ANTECEDENTES OTROS" si existe
-    const antecedentesOtrosExplicitMatch = fullText.match(/ANTECEDENTES\s+OTROS?\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN)[^\n]+)*)/i);
-    if (antecedentesOtrosExplicitMatch && antecedentesOtrosExplicitMatch[1]) {
-      const contenidoExplicito = antecedentesOtrosExplicitMatch[1].trim();
-      // Si ya hay contenido en antecedentes_otros, agregarlo; si no, establecerlo
-      if (historia.antecedentes_otros) {
-        historia.antecedentes_otros = `${historia.antecedentes_otros}\n\nOTROS: ${contenidoExplicito}`;
-      } else {
-        historia.antecedentes_otros = contenidoExplicito;
-      }
+    // Consolidar todos los antecedentes en antecedentes_otros
+    if (antecedentesSections.length > 0) {
+      historia.antecedentes_otros = antecedentesSections.join('\n\n');
+      console.log(`[WordParser] Todos los antecedentes consolidados en antecedentes_otros (${antecedentesSections.length} secciones)`);
     }
 
+    // EXTRAER EXÁMENES MÉDICOS (Examen Físico, Ultrasonido, etc.)
+    const examenesMedicos: string[] = [];
+    
     // Extraer examen físico
-    const examenFisicoMatch = fullText.match(/EXAMEN\s+FISICO\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|Ultrasonido)[^\n]+)*)/i);
+    const examenFisicoMatch = fullText.match(/EXAMEN\s+FISICO\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO|Ultrasonido|DIAGNOSTICO)[^\n]+)*)/i);
     if (examenFisicoMatch && examenFisicoMatch[1]) {
-      historia.examen_fisico = examenFisicoMatch[1].trim();
+      const examenFisico = examenFisicoMatch[1].trim();
+      historia.examen_fisico = examenFisico;
+      examenesMedicos.push(`Examen Físico: ${examenFisico}`);
     }
 
     // Extraer ultrasonido
-    const ultrasonidoMatch = fullText.match(/Ultrasonido[^\n]*(?:\n[^\n]+(?:\n(?!CONCLUSIONES|PLAN)[^\n]+)*)/i);
+    const ultrasonidoMatch = fullText.match(/Ultrasonido[^\n]*(?:\n[^\n]+(?:\n(?!CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO)[^\n]+)*)/i);
     if (ultrasonidoMatch) {
-      historia.ultrasonido = ultrasonidoMatch[0].trim();
+      const ultrasonido = ultrasonidoMatch[0].trim();
+      historia.ultrasonido = ultrasonido;
+      examenesMedicos.push(ultrasonido);
+    }
+
+    // Consolidar todos los exámenes médicos en examenes_medico
+    if (examenesMedicos.length > 0) {
+      historia.examenes_medico = examenesMedicos.join('\n\n');
+      console.log(`[WordParser] Exámenes médicos consolidados (${examenesMedicos.length} secciones)`);
+    }
+
+    // EXTRAER DIAGNÓSTICO (solo la sección DIAGNÓSTICO, no los exámenes)
+    const diagnosticoMatch = fullText.match(/DIAGNÓSTICO\s*:?\s*([^\n]+(?:\n(?!CONCLUSIONES|PLAN|EXAMEN|Ultrasonido)[^\n]+)*)/i) ||
+                             fullText.match(/DIAGNOSTICO\s*:?\s*([^\n]+(?:\n(?!CONCLUSIONES|PLAN|EXAMEN|Ultrasonido)[^\n]+)*)/i);
+    if (diagnosticoMatch && diagnosticoMatch[1]) {
+      historia.diagnostico = diagnosticoMatch[1].trim();
+      console.log(`[WordParser] Diagnóstico extraído: "${historia.diagnostico.substring(0, 100)}..."`);
     }
 
     // Extraer conclusiones
-    const conclusionesMatch = fullText.match(/CONCLUSIONES?\s*:?\s*([^\n]+(?:\n(?!PLAN)[^\n]+)*)/i);
-    if (conclusionesMatch && conclusionesMatch[1]) {
-      historia.conclusiones = conclusionesMatch[1].trim();
+    const conclusionesContentMatch = fullText.match(/CONCLUSIONES?\s*:?\s*([^\n]+(?:\n(?!PLAN)[^\n]+)*)/i);
+    if (conclusionesContentMatch && conclusionesContentMatch[1]) {
+      historia.conclusiones = conclusionesContentMatch[1].trim();
     }
 
     // Extraer plan
     const planMatch = fullText.match(/PLAN\s*:?\s*([^\n]+)/i);
     if (planMatch && planMatch[1]) {
       historia.plan = planMatch[1].trim();
-    }
-
-    // Construir diagnóstico combinando antecedentes y examen físico si no hay campo diagnóstico específico
-    if (!historia.diagnostico) {
-      const diagnosticoParts: string[] = [];
-      if (historia.examen_fisico) diagnosticoParts.push(`Examen Físico: ${historia.examen_fisico}`);
-      if (historia.ultrasonido) diagnosticoParts.push(`Ultrasonido: ${historia.ultrasonido}`);
-      if (diagnosticoParts.length > 0) {
-        historia.diagnostico = diagnosticoParts.join('\n\n');
-      }
     }
 
     return historia;

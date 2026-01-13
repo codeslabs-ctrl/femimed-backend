@@ -5,6 +5,7 @@ export interface HistoricoData {
   paciente_id: number;
   medico_id: number;
   motivo_consulta: string;
+  examenes_medico?: string;
   diagnostico?: string;
   conclusiones?: string;
   plan?: string;
@@ -40,6 +41,7 @@ export class HistoricoService {
           h.paciente_id,
           h.medico_id,
           h.motivo_consulta,
+          h.examenes_medico,
           h.diagnostico,
           h.conclusiones,
           h.plan,
@@ -69,11 +71,12 @@ export class HistoricoService {
       if (result.rows.length === 0) throw new Error('Historia médica no encontrada');
 
       const row = result.rows[0];
-      return {
+      const historico: HistoricoWithDetails = {
         id: row.id,
         paciente_id: row.paciente_id,
         medico_id: row.medico_id,
         motivo_consulta: row.motivo_consulta,
+        examenes_medico: row.examenes_medico,
         diagnostico: row.diagnostico,
         conclusiones: row.conclusiones,
         plan: row.plan,
@@ -92,6 +95,7 @@ export class HistoricoService {
         medico_apellidos: row.medico_apellidos,
         especialidad_nombre: row.especialidad_nombre
       };
+      return historico;
     } finally {
       client.release();
     }
@@ -111,6 +115,7 @@ export class HistoricoService {
             h.paciente_id,
             h.medico_id,
             h.motivo_consulta,
+            h.examenes_medico,
             h.diagnostico,
             h.conclusiones,
             h.plan,
@@ -533,7 +538,7 @@ export class HistoricoService {
       try {
           const query = `
             SELECT 
-              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
+              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.examenes_medico, h.diagnostico, 
               h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
               h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,
@@ -560,11 +565,12 @@ export class HistoricoService {
           const historia = result.rows[0];
           console.log('✅ Historia encontrada: Sí');
           
-          return {
+          const historico: HistoricoWithDetails = {
             id: historia.id,
             paciente_id: historia.paciente_id,
             medico_id: historia.medico_id,
             motivo_consulta: historia.motivo_consulta,
+            examenes_medico: historia.examenes_medico,
             diagnostico: historia.diagnostico,
             conclusiones: historia.conclusiones,
             plan: historia.plan,
@@ -583,6 +589,7 @@ export class HistoricoService {
             medico_apellidos: historia.medico_apellidos,
             especialidad_nombre: historia.especialidad_nombre
           };
+          return historico;
         } finally {
           client.release();
         }
@@ -602,7 +609,7 @@ export class HistoricoService {
       console.log('🔍 updateHistorico - updateData:', updateData);
 
       // Filtrar solo los campos que existen en la tabla historico_medico
-      const allowedFields = ['motivo_consulta', 'diagnostico', 'conclusiones', 'plan', 'antecedentes_personales', 'antecedentes_familiares', 'antecedentes_quirurgicos', 'antecedentes_otros'];
+      const allowedFields = ['motivo_consulta', 'examenes_medico', 'diagnostico', 'conclusiones', 'plan', 'antecedentes_personales', 'antecedentes_familiares', 'antecedentes_quirurgicos', 'antecedentes_otros'];
       const filteredData: any = {};
       
       for (const [key, value] of Object.entries(updateData)) {
@@ -684,7 +691,7 @@ export class HistoricoService {
           // Obtener los datos completos con joins
           const fullDataQuery = `
             SELECT 
-              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
+              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.examenes_medico, h.diagnostico, 
               h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
               h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,
@@ -945,10 +952,10 @@ export class HistoricoService {
       try {
           const insertQuery = `
             INSERT INTO historico_pacientes (
-              paciente_id, medico_id, motivo_consulta, diagnostico, 
+              paciente_id, medico_id, motivo_consulta, examenes_medico, diagnostico, 
               conclusiones, plan, antecedentes_personales, antecedentes_familiares,
               antecedentes_quirurgicos, antecedentes_otros, fecha_consulta
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
           `;
           
@@ -958,6 +965,7 @@ export class HistoricoService {
             historicoData.paciente_id,
             medicoId,
             historicoData.motivo_consulta,
+            (historicoData as HistoricoData).examenes_medico || null,
             historicoData.diagnostico || null,
             historicoData.conclusiones || null,
             historicoData.plan || null,
@@ -974,7 +982,7 @@ export class HistoricoService {
           // Obtener los datos completos con joins
           const fullDataQuery = `
             SELECT 
-              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.diagnostico, 
+              h.id, h.paciente_id, h.medico_id, h.motivo_consulta, h.examenes_medico, h.diagnostico, 
               h.conclusiones, h.plan, h.antecedentes_personales, h.antecedentes_familiares,
               h.antecedentes_quirurgicos, h.antecedentes_otros, h.fecha_consulta, h.fecha_creacion, 
               h.fecha_actualizacion, h.ruta_archivo, h.nombre_archivo,

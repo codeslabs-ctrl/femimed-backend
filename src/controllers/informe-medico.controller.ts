@@ -111,13 +111,19 @@ export class InformeMedicoController {
     try {
       const { id } = req.params;
       const informeId = parseInt(id!);
+      const clinicaAlias = req.clinicaAlias;
 
       if (isNaN(informeId)) {
         res.status(400).json({ success: false, message: 'ID de informe inválido' });
         return;
       }
 
-      const informe = await informeMedicoService.obtenerInformePorId(informeId);
+      if (!clinicaAlias) {
+        res.status(400).json({ success: false, message: 'CLINICA_ALIAS no está configurada' });
+        return;
+      }
+
+      const informe = await informeMedicoService.obtenerInformePorId(informeId, clinicaAlias);
 
       if (!informe) {
         res.status(404).json({ success: false, message: 'Informe médico no encontrado' });
@@ -518,7 +524,12 @@ export class InformeMedicoController {
 
       console.log('📧 [enviarInforme] ID válido:', informeId);
       // Obtener informe
-      const informe = await informeMedicoService.obtenerInformePorId(informeId);
+      const clinicaAlias = req.clinicaAlias;
+      if (!clinicaAlias) {
+        res.status(400).json({ success: false, message: 'CLINICA_ALIAS no está configurada' });
+        return;
+      }
+      const informe = await informeMedicoService.obtenerInformePorId(informeId, clinicaAlias);
       console.log('📧 [enviarInforme] Informe obtenido:', !!informe, informe ? { id: informe.id, numero: informe.numero_informe } : null);
       if (!informe) {
         res.status(404).json({ success: false, message: 'Informe no encontrado' });
@@ -623,9 +634,15 @@ export class InformeMedicoController {
       const informeId = parseInt(id!);
       const { certificado_digital } = req.body;
       const medicoId = (req as any).user?.medico_id;
+      const clinicaAlias = req.clinicaAlias;
 
       if (isNaN(informeId)) {
         res.status(400).json({ success: false, message: 'ID de informe inválido' });
+        return;
+      }
+
+      if (!clinicaAlias) {
+        res.status(400).json({ success: false, message: 'CLINICA_ALIAS no está configurada' });
         return;
       }
 
@@ -646,6 +663,7 @@ export class InformeMedicoController {
         informeId,
         medicoId,
         certificado_digital,
+        clinicaAlias,
         ipFirma,
         userAgent
       );

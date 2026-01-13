@@ -23,7 +23,7 @@ export class PDFService {
     try {
       console.log(`🔄 Generando PDF para informe ${informeId}`);
       
-      // Obtener el informe con datos básicos del médico (PostgreSQL)
+      // Obtener el informe con datos básicos del médico y paciente (PostgreSQL)
       let informe: any;
       try {
         const result = await client.query(
@@ -32,10 +32,15 @@ export class PDFService {
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
             m.especialidad_id,
-            e.nombre_especialidad
+            e.nombre_especialidad,
+            p.nombres as paciente_nombres,
+            p.apellidos as paciente_apellidos,
+            p.cedula as paciente_cedula,
+            p.edad as paciente_edad
           FROM informes_medicos i
           LEFT JOIN medicos m ON i.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
+          LEFT JOIN pacientes p ON i.paciente_id = p.id
           WHERE i.id = $1
           LIMIT 1`,
           [informeId]
@@ -53,6 +58,33 @@ export class PDFService {
           apellidos: informe.medico_apellidos,
           especialidad: informe.nombre_especialidad || 'Medicina General'
         };
+        
+        // Obtener edad del paciente (directamente de la columna edad o calcular si no existe)
+        let edad = '';
+        try {
+          // Primero intentar usar la columna edad directamente
+          if (informe.paciente_edad !== null && informe.paciente_edad !== undefined) {
+            edad = informe.paciente_edad.toString();
+          }
+        } catch (edadError: any) {
+          console.warn('⚠️ Error obteniendo edad del paciente:', edadError.message);
+          edad = '';
+        }
+        
+        // Datos del paciente para la línea descriptiva (siempre definir, incluso si está vacío)
+        informe.paciente = {
+          nombres: informe.paciente_nombres || '',
+          apellidos: informe.paciente_apellidos || '',
+          cedula: informe.paciente_cedula || '',
+          edad: edad
+        };
+        
+        console.log('👤 Datos del paciente para PDF:', {
+          nombres: informe.paciente.nombres,
+          apellidos: informe.paciente.apellidos,
+          cedula: informe.paciente.cedula,
+          edad: informe.paciente.edad
+        });
       } catch (dbError: any) {
         console.error('❌ Error obteniendo informe de la base de datos:', dbError);
         throw new Error(`Error obteniendo informe: ${dbError.message}`);
@@ -80,10 +112,20 @@ export class PDFService {
       // Generar HTML para el PDF
       let htmlContent = '';
       try {
+        console.log('🔄 Generando HTML para PDF...');
+        console.log('📋 Informe recibido:', {
+          id: informe.id,
+          tienePaciente: !!informe.paciente,
+          pacienteNombres: informe.paciente?.nombres,
+          pacienteApellidos: informe.paciente?.apellidos,
+          pacienteCedula: informe.paciente?.cedula,
+          pacienteEdad: informe.paciente?.edad
+        });
         htmlContent = await this.generarHTMLParaPDF(informe, firmaBase64);
         console.log('✅ HTML generado, tamaño:', htmlContent.length, 'caracteres');
       } catch (htmlError: any) {
         console.error('❌ Error generando HTML:', htmlError);
+        console.error('❌ Stack trace:', htmlError.stack);
         throw new Error(`Error generando HTML para PDF: ${htmlError.message}`);
       }
       
@@ -484,70 +526,111 @@ export class PDFService {
   }
 
   /**
-   * Procesa el contenido del informe para aplicar estilos de columnas
+   * Procesa el contenido del informe para aplicar estilos
+   * Mantiene el orden original del contenido sin duplicar datos
+   * Agrega línea descriptiva del paciente antes del Motivo de Consulta
    */
-  private procesarContenidoInforme(contenido: string, _informe: any): string {
-    // Buscar secciones de datos del paciente y aplicar estilos de columnas
-    let contenidoProcesado = contenido;
-    
-    // Reemplazar por una línea descriptiva del paciente (dinámica)
-    // Asegurarse de que no capture los antecedentes que vienen después
-    contenidoProcesado = contenidoProcesado.replace(
-      /<h2>Datos del Paciente<\/h2>[\s\S]*?(?=<h2>Datos del Médico|<h2>|<h3>|<div class="antecedentes-seccion">|$)/gi,
-      (_match) => {
-        const datos = _match.replace(/<h2>Datos del Paciente<\/h2>/i, '');
-
-        const extraerEtiqueta = (campo: string): string => {
-          const patrones = [
-            new RegExp(`<strong>\\s*${campo}\\s*:<\\/strong>\\s*([^<\\\n]+)`, 'i'),
-            new RegExp(`${campo}\\s*:\\s*([^<\\\n]+)`, 'i'),
-            new RegExp(`<b>\\s*${campo}\\s*:<\\/b>\\s*([^<\\\n]+)`, 'i')
-          ];
-          for (const rx of patrones) {
-            const m = datos.match(rx);
-            if (m && m[1]) return m[1].trim();
-          }
-          return '';
-        };
-
-        const nombre = extraerEtiqueta('Nombre');
-        const edad = extraerEtiqueta('Edad');
-        const sexoRaw = extraerEtiqueta('Sexo');
-        const cedula = extraerEtiqueta('Cédula') || extraerEtiqueta('Cedula');
-
-        let sexo = '';
-        if (sexoRaw) {
-          const s = sexoRaw.toLowerCase().trim();
-          if (s.startsWith('f')) sexo = 'femenino';
-          else if (s.startsWith('m')) sexo = 'masculino';
-          else sexo = s;
-        }
-
-        // Construcción robusta sin comas colgantes
-        const partes: string[] = [];
-        if (nombre) partes.push(nombre);
-        if (cedula) partes.push(`cédula de identidad ${cedula}`);
-
-        const descrip: string[] = ['paciente'];
-        if (sexo) descrip.push(sexo);
-        if (edad) descrip.push(`de ${edad} de edad`);
-
-        const frase = `${partes.join(', ')}${partes.length ? ', ' : ''}${descrip.join(' ')}.`.replace(/\s+,/g, ',').replace(/\s+/g, ' ').trim();
-        return `<p>${frase}</p>`;
+  private procesarContenidoInforme(contenido: string, informe: any): string {
+    try {
+      if (!contenido) {
+        console.warn('⚠️ Contenido vacío recibido en procesarContenidoInforme');
+        return '<div class="informe-content"><p>No hay contenido disponible.</p></div>';
       }
-    );
-
-    // Remover completamente la sección "Datos del Médico"
-    // Asegurarse de que no elimine los antecedentes que vienen después
+      
+      let contenidoProcesado = contenido;
+    
+    // Remover secciones "Datos del Paciente" y "Datos del Médico" si existen
+    // ya que estos datos no deben aparecer en el PDF (solo la firma del médico)
+    // Mantener el resto del contenido en su orden original
+    
+    // Remover "Datos del Paciente" (desde el h2 hasta el siguiente h2, h3, hr o div)
     contenidoProcesado = contenidoProcesado.replace(
-      /<h2>Datos del Médico<\/h2>([\s\S]*?)(?=<div class="antecedentes-seccion">|<h2>|<h3>|$)/gi,
+      /<h2>Datos del Paciente<\/h2>[\s\S]*?(?=<h2>Datos del Médico|<h2>|<h3>|<hr>|<div class="historia-seccion">|<div class="antecedentes-seccion">|$)/gi,
       ''
     );
+
+    // Remover "Datos del Médico" (desde el h2 hasta el siguiente h2, h3, hr o div)
+    contenidoProcesado = contenidoProcesado.replace(
+      /<h2>Datos del Médico<\/h2>[\s\S]*?(?=<h2>|<h3>|<hr>|<div class="historia-seccion">|<div class="antecedentes-seccion">|$)/gi,
+      ''
+    );
+    
+    // Limpiar múltiples <hr> consecutivos que puedan quedar
+    contenidoProcesado = contenidoProcesado.replace(/(<hr>\s*){2,}/gi, '<hr>');
+    
+    // Limpiar espacios en blanco excesivos
+    contenidoProcesado = contenidoProcesado.replace(/\n{3,}/g, '\n\n');
+    
+    // Construir línea descriptiva del paciente
+    let lineaDescriptiva = '';
+    try {
+      if (informe && informe.paciente) {
+        const partes: string[] = [];
+        
+        // Nombre completo
+        const nombreCompleto = `${informe.paciente.nombres || ''} ${informe.paciente.apellidos || ''}`.trim();
+        if (nombreCompleto) {
+          partes.push(nombreCompleto);
+        }
+        
+        // Cédula
+        if (informe.paciente.cedula) {
+          partes.push(`cédula de identidad ${informe.paciente.cedula}`);
+        }
+        
+        // Construir descripción
+        const descripcion: string[] = ['paciente'];
+        if (informe.paciente.edad) {
+          descripcion.push(`de ${informe.paciente.edad} años de edad`);
+        }
+        
+        // Unir todo
+        if (partes.length > 0) {
+          lineaDescriptiva = `${partes.join(', ')}, ${descripcion.join(' ')}.`;
+        } else if (descripcion.length > 1) {
+          lineaDescriptiva = `${descripcion.join(' ')}.`;
+        }
+      }
+    } catch (error: any) {
+      console.warn('⚠️ Error construyendo línea descriptiva del paciente:', error.message);
+      lineaDescriptiva = '';
+    }
+    
+    // Agregar línea descriptiva antes del "Motivo de Consulta" si existe
+    if (lineaDescriptiva) {
+      // Buscar la primera ocurrencia de "Motivo de Consulta"
+      const motivoIndex = contenidoProcesado.search(/<h3><strong>Motivo de Consulta:/i);
+      if (motivoIndex !== -1) {
+        // Buscar hacia atrás desde el Motivo de Consulta para encontrar y eliminar <hr> cercanos
+        const antesDeMotivo = contenidoProcesado.slice(0, motivoIndex);
+        const despuesDeMotivo = contenidoProcesado.slice(motivoIndex);
+        
+        // Eliminar <hr> y espacios en blanco justo antes del Motivo de Consulta
+        const antesLimpio = antesDeMotivo.replace(/(<hr[^>]*>\s*)+$/i, '').trimEnd();
+        
+        // Insertar la línea descriptiva antes del Motivo de Consulta
+        contenidoProcesado = antesLimpio + 
+                            (antesLimpio ? '\n' : '') +
+                            `<p>${lineaDescriptiva}</p>` + 
+                            '\n' +
+                            despuesDeMotivo;
+      } else {
+        // Si no hay Motivo de Consulta, agregar al inicio (eliminando <hr> iniciales)
+        const inicioLimpio = contenidoProcesado.replace(/^(<hr[^>]*>\s*)+/i, '');
+        contenidoProcesado = `<p>${lineaDescriptiva}</p>` + '\n' + inicioLimpio;
+      }
+    }
     
     // Envolver TODO el contenido del informe en un solo contenedor
     contenidoProcesado = `<div class="informe-content">${contenidoProcesado}</div>`;
     
     return contenidoProcesado;
+    } catch (error: any) {
+      console.error('❌ Error en procesarContenidoInforme:', error);
+      console.error('❌ Stack trace:', error.stack);
+      // Retornar contenido mínimo en caso de error
+      return '<div class="informe-content"><p>Error procesando el contenido del informe.</p></div>';
+    }
   }
 
   // Eliminado: formatearDatosPaciente (ya no se usa)

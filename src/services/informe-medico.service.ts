@@ -256,10 +256,10 @@ export class InformeMedicoService {
     }
   }
 
-  async obtenerInformePorId(id: number): Promise<InformeMedico | null> {
+  async obtenerInformePorId(id: number, clinicaAlias?: string): Promise<InformeMedico | null> {
     const client = await postgresPool.connect();
     try {
-      const result = await client.query(`
+      let query = `
         SELECT 
           im.*,
           json_build_object(
@@ -287,7 +287,17 @@ export class InformeMedicoService {
         LEFT JOIN medicos m ON im.medico_id = m.id
         LEFT JOIN templates_informes t ON im.template_id = t.id
         WHERE im.id = $1
-      `, [id]);
+      `;
+      
+      const params: any[] = [id];
+      
+      // Si se proporciona clinica_alias, agregar filtro
+      if (clinicaAlias) {
+        query += ` AND im.clinica_alias = $2`;
+        params.push(clinicaAlias);
+      }
+      
+      const result = await client.query(query, params);
 
       if (result.rows.length === 0) {
         return null;
@@ -676,13 +686,13 @@ export class InformeMedicoService {
   // FIRMA DIGITAL
   // =====================================================
 
-  async firmarInforme(informeId: number, medicoId: number, certificadoDigital: string, ipFirma?: string, userAgent?: string): Promise<boolean> {
+  async firmarInforme(informeId: number, medicoId: number, certificadoDigital: string, clinicaAlias?: string, ipFirma?: string, userAgent?: string): Promise<boolean> {
     const client = await postgresPool.connect();
     try {
       await client.query('BEGIN');
 
       // Obtener contenido del informe
-      const informe = await this.obtenerInformePorId(informeId);
+      const informe = await this.obtenerInformePorId(informeId, clinicaAlias);
       if (!informe) {
         throw new Error('Informe no encontrado');
       }
