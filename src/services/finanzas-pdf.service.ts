@@ -39,10 +39,10 @@ export class FinanzasPDFService {
         format: 'A4',
         printBackground: true,
         margin: {
-          top: '20mm',
-          right: '15mm',
-          bottom: '20mm',
-          left: '15mm'
+          top: '10mm',
+          right: '10mm',
+          bottom: '10mm',
+          left: '10mm'
         }
       });
       
@@ -68,17 +68,45 @@ export class FinanzasPDFService {
     const fechaHasta = filtros?.fecha_hasta ? new Date(filtros.fecha_hasta).toLocaleDateString('es-VE') : 'N/A';
     const periodo = `${fechaDesde} - ${fechaHasta}`;
     
+    // Función auxiliar para parsear valores numéricos
+    const parsearNumero = (valor: any): number => {
+      if (valor === null || valor === undefined) return 0;
+      if (typeof valor === 'number') return valor;
+      if (typeof valor === 'string') {
+        const limpio = valor.trim().replace(/[^\d.,-]/g, '');
+        return parseFloat(limpio.replace(',', '.')) || 0;
+      }
+      return Number(valor) || 0;
+    };
+
     // Calcular totales por moneda (solo de las consultas ya filtradas)
-    const totalesPorMoneda = consultas.reduce((totales: any, consulta: any) => {
+    const totalesPorMoneda: { [key: string]: number } = {};
+    const consultasPorMoneda: { [key: string]: number } = {};
+    
+    consultas.forEach((consulta: any) => {
       consulta.servicios_consulta?.forEach((servicio: any) => {
-        const moneda = servicio.moneda_pago;
-        if (!totales[moneda]) {
-          totales[moneda] = 0;
+        const moneda = (servicio.moneda_pago || 'VES').toUpperCase().trim();
+        const monto = parsearNumero(servicio.monto_pagado);
+        
+        if (!totalesPorMoneda[moneda]) {
+          totalesPorMoneda[moneda] = 0;
+          consultasPorMoneda[moneda] = 0;
         }
-        totales[moneda] += servicio.monto_pagado || 0;
+        
+        totalesPorMoneda[moneda] += monto;
       });
-      return totales;
-    }, {});
+      
+      // Contar consultas por moneda (cada consulta cuenta una vez por moneda si tiene servicios de esa moneda)
+      const monedasEnConsulta = new Set<string>(
+        consulta.servicios_consulta?.map((s: any) => (s.moneda_pago || 'VES').toUpperCase().trim()) || []
+      );
+      monedasEnConsulta.forEach((moneda: string) => {
+        if (!consultasPorMoneda[moneda]) {
+          consultasPorMoneda[moneda] = 0;
+        }
+        consultasPorMoneda[moneda]++;
+      });
+    });
 
     // Si hay filtro de moneda específico, mostrar solo esa moneda en el resumen
     if (opciones?.moneda && opciones.moneda !== 'TODAS') {
@@ -105,36 +133,38 @@ export class FinanzasPDFService {
           body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 8px;
             color: #333;
+            font-size: 9pt;
           }
           .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 12px;
             border-bottom: 2px solid #366092;
-            padding-bottom: 20px;
+            padding-bottom: 8px;
           }
           .header h1 {
             color: #366092;
             margin: 0;
-            font-size: 24px;
+            font-size: 18px;
           }
           .header h2 {
             color: #666;
-            margin: 5px 0 0 0;
-            font-size: 16px;
+            margin: 3px 0 0 0;
+            font-size: 12px;
             font-weight: normal;
           }
           .info-section {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
+            padding: 8px;
+            border-radius: 3px;
+            font-size: 8pt;
           }
           .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
           }
           .info-label {
             font-weight: bold;
@@ -143,44 +173,75 @@ export class FinanzasPDFService {
           table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
+            margin-top: 10px;
+            font-size: 8pt;
           }
           th, td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 4px;
             text-align: left;
           }
           th {
             background-color: #366092;
             color: white;
             font-weight: bold;
+            font-size: 8pt;
           }
           tr:nth-child(even) {
             background-color: #f2f2f2;
           }
           .totals-section {
-            margin-top: 30px;
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 8px;
+          }
+          .currency-box {
             background-color: #e8f4fd;
-            padding: 15px;
-            border-radius: 5px;
+            padding: 8px;
+            border-radius: 3px;
+            border: 1.5px solid #366092;
+          }
+          .currency-title {
+            font-weight: bold;
+            color: #366092;
+            font-size: 12px;
+            margin-bottom: 6px;
+            text-align: center;
+            border-bottom: 1px solid #366092;
+            padding-bottom: 4px;
+          }
+          .currency-stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            padding: 2px 0;
+            font-size: 8pt;
+          }
+          .currency-stat-label {
+            font-weight: 600;
+            color: #555;
+          }
+          .currency-stat-value {
+            font-weight: bold;
+            color: #366092;
+            font-size: 10pt;
           }
           .totals-title {
             font-weight: bold;
             color: #366092;
-            margin-bottom: 10px;
-          }
-          .total-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            font-size: 14px;
+            grid-column: 1 / -1;
+            text-align: center;
           }
           .footer {
-            margin-top: 30px;
+            margin-top: 12px;
             text-align: center;
-            font-size: 12px;
+            font-size: 8pt;
             color: #666;
             border-top: 1px solid #ddd;
-            padding-top: 10px;
+            padding-top: 6px;
           }
         </style>
       </head>
@@ -251,13 +312,30 @@ export class FinanzasPDFService {
         </table>
         
         <div class="totals-section">
-          <div class="totals-title">Resumen por Moneda:</div>
-          ${Object.entries(totalesPorMoneda).map(([moneda, total]) => `
-            <div class="total-row">
-              <span>Total en ${moneda}:</span>
-              <span><strong>${total}</strong></span>
-            </div>
-          `).join('')}
+          <div class="totals-title">Resumen por Moneda</div>
+          ${Object.entries(totalesPorMoneda).map(([moneda, total]) => {
+            const totalFormateado = typeof total === 'number' ? total.toFixed(2) : String(total);
+            const consultasCount = consultasPorMoneda[moneda] || 0;
+            const promedio = consultasCount > 0 ? (total / consultasCount) : 0;
+            
+            return `
+              <div class="currency-box">
+                <div class="currency-title">${moneda}</div>
+                <div class="currency-stat">
+                  <span class="currency-stat-label">Consultas:</span>
+                  <span class="currency-stat-value">${consultasCount}</span>
+                </div>
+                <div class="currency-stat">
+                  <span class="currency-stat-label">Total Ingresos:</span>
+                  <span class="currency-stat-value">${totalFormateado} ${moneda}</span>
+                </div>
+                <div class="currency-stat">
+                  <span class="currency-stat-label">Promedio:</span>
+                  <span class="currency-stat-value">${promedio.toFixed(2)} ${moneda}</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
         </div>
         
         <div class="footer">

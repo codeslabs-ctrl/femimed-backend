@@ -228,62 +228,78 @@ export class ImportacionController {
           }
           console.log(`📋 Procesando hoja ${i + 1} de ${pages.length} para paciente ID: ${pacienteId}`);
           
-          // Parsear cada hoja
-          const parsedData = this.parserService.parseDocument(pageText, file.originalname);
+          try {
+            // Parsear cada hoja
+            const parsedData = this.parserService.parseDocument(pageText, file.originalname);
+            
+            console.log(`📝 Datos parseados para hoja ${i + 1}:`, {
+              motivo_consulta: parsedData.historia.motivo_consulta ? 'Sí' : 'No',
+              diagnostico: parsedData.historia.diagnostico ? 'Sí' : 'No',
+              examenes_medico: parsedData.historia.examenes_medico ? 'Sí' : 'No',
+              antecedentes_otros: parsedData.historia.antecedentes_otros ? 'Sí' : 'No',
+              plan: parsedData.historia.plan ? 'Sí' : 'No',
+              conclusiones: parsedData.historia.conclusiones ? 'Sí' : 'No'
+            });
 
-          // Extraer campos individuales
-          let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
-          // diagnostico ahora contiene solo la sección DIAGNÓSTICO (no los exámenes)
-          let diagnostico = parsedData.historia.diagnostico || '';
-          // examenes_medico contiene Examen Físico, Ultrasonido, etc.
-          let examenesMedico = parsedData.historia.examenes_medico || '';
-          let conclusiones = parsedData.historia.conclusiones || '';
-          let plan = parsedData.historia.plan || '';
-          // antecedentes_otros ahora contiene TODOS los antecedentes consolidados
-          let antecedentesOtros = parsedData.historia.antecedentes_otros || '';
+            // Extraer campos individuales
+            let motivoConsulta = parsedData.historia.motivo_consulta || 'Consulta médica';
+            // diagnostico ahora contiene solo la sección DIAGNÓSTICO (no los exámenes)
+            let diagnostico = parsedData.historia.diagnostico || '';
+            // examenes_medico contiene Examen Físico, Ultrasonido, etc.
+            let examenesMedico = parsedData.historia.examenes_medico || '';
+            let conclusiones = parsedData.historia.conclusiones || '';
+            let plan = parsedData.historia.plan || '';
+            // antecedentes_otros ahora contiene TODOS los antecedentes consolidados
+            let antecedentesOtros = parsedData.historia.antecedentes_otros || '';
 
-          // motivo_consulta debe contener SOLO el motivo de consulta
-          const motivoConsultaFormateado = motivoConsulta ? `<p>${motivoConsulta}</p>` : '<p>Consulta médica</p>';
+            // motivo_consulta debe contener SOLO el motivo de consulta
+            const motivoConsultaFormateado = motivoConsulta ? `<p>${motivoConsulta}</p>` : '<p>Consulta médica</p>';
 
-          // Formatear diagnostico (puede contener múltiples líneas)
-          const diagnosticoFormateado = diagnostico ? diagnostico.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null;
+            // Formatear diagnostico (puede contener múltiples líneas)
+            const diagnosticoFormateado = diagnostico ? diagnostico.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null;
 
-          // Formatear examenes_medico (puede contener múltiples líneas)
-          const examenesMedicoFormateado = examenesMedico ? examenesMedico.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null;
+            // Formatear examenes_medico (puede contener múltiples líneas)
+            const examenesMedicoFormateado = examenesMedico ? examenesMedico.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null;
 
-          // Usar la fecha extraída de la hoja, o la fecha actual si no se encontró
-          const fechaConsulta = parsedData.historia.fecha_consulta || new Date().toISOString().split('T')[0];
-          console.log(`📅 Fecha de consulta para hoja ${i + 1}: ${fechaConsulta}`);
+            // Usar la fecha extraída de la hoja, o la fecha actual si no se encontró
+            const fechaConsulta = parsedData.historia.fecha_consulta || new Date().toISOString().split('T')[0];
+            console.log(`📅 Fecha de consulta para hoja ${i + 1}: ${fechaConsulta}`);
 
-          const historiaResult = await client.query(
-            `INSERT INTO historico_pacientes (
-              paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
-              antecedentes_personales, antecedentes_familiares, antecedentes_quirurgicos, antecedentes_otros, examenes_medico
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING id`,
-            [
-              pacienteId,
-              medicoIdToUse,
-              motivoConsultaFormateado,
-              diagnosticoFormateado,
-              conclusiones ? `<p>${conclusiones}</p>` : null,
-              plan ? `<p>${plan}</p>` : null,
-              fechaConsulta,
-              process.env['CLINICA_ALIAS'] || 'femimed',
-              null, // antecedentes_personales (ya no se usa)
-              null, // antecedentes_familiares (ya no se usa)
-              null, // antecedentes_quirurgicos (ya no se usa)
-              antecedentesOtros ? antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null,
-              examenesMedicoFormateado
-            ]
-          );
-          
-          const historiaId = historiaResult.rows[0]?.id;
-          if (historiaId) {
-            historiasCreadas.push(historiaId);
-            console.log(`✅ Historia creada con ID: ${historiaId} para hoja ${i + 1}`);
-          } else {
-            console.error(`❌ Error: No se pudo obtener el ID de la historia creada para hoja ${i + 1}`);
+            console.log(`💾 Insertando historia para paciente ID: ${pacienteId}, médico ID: ${medicoIdToUse}`);
+
+            const historiaResult = await client.query(
+              `INSERT INTO historico_pacientes (
+                paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
+                antecedentes_otros, examenes_medico
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              RETURNING id`,
+              [
+                pacienteId,
+                medicoIdToUse,
+                motivoConsultaFormateado,
+                diagnosticoFormateado,
+                conclusiones ? `<p>${conclusiones}</p>` : null,
+                plan ? `<p>${plan}</p>` : null,
+                fechaConsulta,
+                process.env['CLINICA_ALIAS'] || 'femimed',
+                antecedentesOtros ? antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null,
+                examenesMedicoFormateado
+              ]
+            );
+            
+            const historiaId = historiaResult.rows[0]?.id;
+            if (historiaId) {
+              historiasCreadas.push(historiaId);
+              console.log(`✅ Historia creada con ID: ${historiaId} para hoja ${i + 1}`);
+            } else {
+              console.error(`❌ Error: No se pudo obtener el ID de la historia creada para hoja ${i + 1}`);
+              console.error(`   Resultado del INSERT:`, historiaResult);
+            }
+          } catch (historiaError: any) {
+            console.error(`❌ Error procesando hoja ${i + 1} para paciente ID ${pacienteId}:`, historiaError);
+            console.error(`   Mensaje:`, historiaError.message);
+            console.error(`   Stack:`, historiaError.stack);
+            // Continuar con la siguiente hoja en lugar de fallar completamente
           }
         }
       } finally {
@@ -526,8 +542,8 @@ export class ImportacionController {
               await client.query(
                 `INSERT INTO historico_pacientes (
                   paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
-                  antecedentes_personales, antecedentes_familiares, antecedentes_quirurgicos, antecedentes_otros, examenes_medico
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+                  antecedentes_otros, examenes_medico
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                 [
                   pacienteId,
                   medicoIdToUse,
@@ -537,9 +553,6 @@ export class ImportacionController {
                   plan ? `<p>${plan}</p>` : null,
                   fechaConsulta,
                   process.env['CLINICA_ALIAS'] || 'femimed',
-                  null, // antecedentes_personales (ya no se usa)
-                  null, // antecedentes_familiares (ya no se usa)
-                  null, // antecedentes_quirurgicos (ya no se usa)
                   antecedentesOtros ? antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null,
                   examenesMedicoFormateado
                 ]

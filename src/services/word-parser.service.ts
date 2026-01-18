@@ -331,12 +331,16 @@ export class WordParserService {
     // EXTRAER EXÁMENES FÍSICOS (Examen Físico, Ultrasonido, etc.)
     const examenesFisicos: string[] = [];
     
-    // Extraer examen físico
-    const examenFisicoMatch = fullText.match(/EXAMEN\s+FISICO\s*:?\s*([^\n]+(?:\n(?!ANTECEDENTES|EXAMEN|CONCLUSIONES|PLAN|DIAGNÓSTICO|DIAGNOSTICO|Ultrasonido|DIAGNOSTICO)[^\n]+)*)/i);
+    // Extraer examen físico - capturar todo el contenido hasta la siguiente sección importante
+    // Buscar desde "EXAMEN FISICO" hasta "DIAGNÓSTICO", "CONCLUSIONES", "PLAN", o fin del texto
+    const examenFisicoMatch = fullText.match(/EXAMEN\s+FISICO\s*:?\s*([\s\S]*?)(?=\s*(?:DIAGNÓSTICO|DIAGNOSTICO|CONCLUSIONES|PLAN|ANTECEDENTES|EXAMEN\s+(?!FISICO))|$)/i);
     if (examenFisicoMatch && examenFisicoMatch[1]) {
       const examenFisico = examenFisicoMatch[1].trim();
-      historia.examen_fisico = examenFisico;
-      examenesFisicos.push(`Examen Físico: ${examenFisico}`);
+      if (examenFisico) {
+        historia.examen_fisico = examenFisico;
+        examenesFisicos.push(examenFisico);
+        console.log(`[WordParser] Examen Físico extraído: "${examenFisico.substring(0, 100)}..."`);
+      }
     }
 
     // Extraer ultrasonido

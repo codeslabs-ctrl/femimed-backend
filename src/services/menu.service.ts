@@ -1,0 +1,409 @@
+import { postgresPool } from '../config/database.js';
+
+export interface MenuItem {
+  id: number;
+  nombre: string;
+  icono: string | null;
+  ruta: string | null;
+  orden: number;
+  activo: boolean;
+  padre_id: number | null;
+  tipo: 'encabezado' | 'opcion';
+  es_visible: boolean;
+  hijos?: MenuItem[];
+}
+
+export interface PerfilMenuAcceso {
+  id: number;
+  perfil_id: number;
+  menu_item_id: number;
+  puede_acceder: boolean;
+  puede_crear: boolean;
+  puede_editar: boolean;
+  puede_eliminar: boolean;
+  puede_finalizar: boolean;
+  puede_completar: boolean;
+  puede_ver_servicios: boolean;
+}
+
+export interface Perfil {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+  activo: boolean;
+}
+
+export class MenuService {
+  /**
+   * Obtiene todos los items del menú organizados en jerarquía
+   */
+  async getMenuItems(): Promise<MenuItem[]> {
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(`
+        SELECT 
+          id,
+          nombre,
+          icono,
+          ruta,
+          orden,
+          activo,
+          padre_id,
+          tipo,
+          es_visible
+        FROM menu_items
+        WHERE activo = true
+        ORDER BY orden, id
+      `);
+
+      const items = result.rows as MenuItem[];
+      
+      // Organizar en jerarquía
+      const itemsMap = new Map<number, MenuItem>();
+      const rootItems: MenuItem[] = [];
+
+      // Primero crear el mapa
+      items.forEach(item => {
+        itemsMap.set(item.id, { ...item, hijos: [] });
+      });
+
+      // Luego organizar la jerarquía
+      items.forEach(item => {
+        const menuItem = itemsMap.get(item.id)!;
+        if (item.padre_id === null) {
+          rootItems.push(menuItem);
+        } else {
+          const parent = itemsMap.get(item.padre_id);
+          if (parent) {
+            if (!parent.hijos) {
+              parent.hijos = [];
+            }
+            parent.hijos.push(menuItem);
+          }
+        }
+      });
+
+      return rootItems;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Obtiene el menú filtrado por perfil
+   */
+  async getMenuByPerfil(perfilNombre: string): Promise<MenuItem[]> {
+    const client = await postgresPool.connect();
+    try {
+      // Obtener el perfil
+      const perfilResult = await client.query(
+        'SELECT id FROM perfiles WHERE nombre = $1 AND activo = true',
+        [perfilNombre]
+      );
+
+      if (perfilResult.rows.length === 0) {
+        return [];
+      }
+
+      const perfilId = perfilResult.rows[0].id;
+
+      // Obtener items del menú con permisos del perfil
+      const result = await client.query(`
+        SELECT 
+          mi.id,
+          mi.nombre,
+          mi.icono,
+          mi.ruta,
+          mi.orden,
+          mi.activo,
+          mi.padre_id,
+          mi.tipo,
+          mi.es_visible,
+          COALESCE(pma.puede_acceder, false) as puede_acceder
+        FROM menu_items mi
+        LEFT JOIN perfiles_menu_acceso pma ON (
+          mi.id = pma.menu_item_id 
+          AND pma.perfil_id = $1
+        )
+        WHERE mi.activo = true
+          AND (pma.puede_acceder = true OR mi.padre_id IS NULL)
+        ORDER BY mi.orden, mi.id
+      `, [perfilId]);
+
+      const items = result.rows as (MenuItem & { puede_acceder: boolean })[];
+      
+      // Filtrar solo items accesibles y organizar en jerarquía
+      const accessibleItems = items.filter(item => {
+        // Si es encabezado, debe tener al menos un hijo accesible
+        if (item.tipo === 'encabezado') {
+          return true; // Se filtrará después si no tiene hijos accesibles
+        }
+        return item.puede_acceder;
+      });
+
+      const itemsMap = new Map<number, MenuItem>();
+      const rootItems: MenuItem[] = [];
+
+      // Crear el mapa
+      accessibleItems.forEach(item => {
+        itemsMap.set(item.id, { 
+          ...item, 
+          hijos: [],
+          puede_acceder: undefined 
+        } as MenuItem);
+      });
+
+      // Organizar jerarquía
+      accessibleItems.forEach(item => {
+        const menuItem = itemsMap.get(item.id)!;
+        if (item.padre_id === null) {
+          rootItems.push(menuItem);
+        } else {
+          const parent = itemsMap.get(item.padre_id);
+          if (parent) {
+            if (!parent.hijos) {
+              parent.hijos = [];
+            }
+            parent.hijos.push(menuItem);
+          }
+        }
+      });
+
+      // Filtrar encabezados sin hijos accesibles
+      const filteredRootItems = rootItems.filter(item => {
+        if (item.tipo === 'encabezado') {
+          return item.hijos && item.hijos.length > 0;
+        }
+        return true;
+      });
+
+      return filteredRootItems;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Obtiene todos los perfiles
+   */
+  async getPerfiles(): Promise<Perfil[]> {
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(`
+        SELECT id, nombre, descripcion, activo
+        FROM perfiles
+        WHERE activo = true
+        ORDER BY nombre
+      `);
+
+      return result.rows as Perfil[];
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Obtiene permisos de un perfil para todos los items del menú
+   */
+  async getPermisosByPerfil(perfilId: number): Promise<PerfilMenuAcceso[]> {
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(`
+        SELECT 
+          pma.id,
+          pma.perfil_id,
+          pma.menu_item_id,
+          pma.puede_acceder,
+          pma.puede_crear,
+          pma.puede_editar,
+          pma.puede_eliminar,
+          pma.puede_finalizar,
+          pma.puede_completar,
+          pma.puede_ver_servicios
+        FROM perfiles_menu_acceso pma
+        WHERE pma.perfil_id = $1
+        ORDER BY pma.menu_item_id
+      `, [perfilId]);
+
+      return result.rows as PerfilMenuAcceso[];
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Actualiza permisos de un perfil para un item del menú
+   */
+  async updatePermisos(
+    perfilId: number,
+    menuItemId: number,
+    permisos: Partial<Omit<PerfilMenuAcceso, 'id' | 'perfil_id' | 'menu_item_id'>>
+  ): Promise<PerfilMenuAcceso> {
+    const client = await postgresPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar si existe el registro
+      const existing = await client.query(
+        'SELECT id FROM perfiles_menu_acceso WHERE perfil_id = $1 AND menu_item_id = $2',
+        [perfilId, menuItemId]
+      );
+
+      let result;
+      if (existing.rows.length > 0) {
+        // Actualizar
+        const setClauses: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        Object.keys(permisos).forEach(key => {
+          if (permisos[key as keyof typeof permisos] !== undefined) {
+            setClauses.push(`${key} = $${paramIndex}`);
+            values.push(permisos[key as keyof typeof permisos]);
+            paramIndex++;
+          }
+        });
+
+        if (setClauses.length === 0) {
+          await client.query('ROLLBACK');
+          throw new Error('No hay campos para actualizar');
+        }
+
+        setClauses.push(`actualizado_en = CURRENT_TIMESTAMP`);
+        values.push(perfilId, menuItemId);
+
+        result = await client.query(`
+          UPDATE perfiles_menu_acceso
+          SET ${setClauses.join(', ')}
+          WHERE perfil_id = $${paramIndex} AND menu_item_id = $${paramIndex + 1}
+          RETURNING *
+        `, values);
+      } else {
+        // Insertar
+        result = await client.query(`
+          INSERT INTO perfiles_menu_acceso (
+            perfil_id,
+            menu_item_id,
+            puede_acceder,
+            puede_crear,
+            puede_editar,
+            puede_eliminar,
+            puede_finalizar,
+            puede_completar,
+            puede_ver_servicios
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *
+        `, [
+          perfilId,
+          menuItemId,
+          permisos.puede_acceder ?? false,
+          permisos.puede_crear ?? false,
+          permisos.puede_editar ?? false,
+          permisos.puede_eliminar ?? false,
+          permisos.puede_finalizar ?? false,
+          permisos.puede_completar ?? false,
+          permisos.puede_ver_servicios ?? false
+        ]);
+      }
+
+      await client.query('COMMIT');
+      return result.rows[0] as PerfilMenuAcceso;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Actualiza múltiples permisos de un perfil
+   */
+  async updatePermisosBulk(
+    perfilId: number,
+    permisos: Array<{
+      menu_item_id: number;
+      puede_acceder?: boolean;
+      puede_crear?: boolean;
+      puede_editar?: boolean;
+      puede_eliminar?: boolean;
+      puede_finalizar?: boolean;
+      puede_completar?: boolean;
+      puede_ver_servicios?: boolean;
+    }>
+  ): Promise<void> {
+    const client = await postgresPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const permiso of permisos) {
+        const existing = await client.query(
+          'SELECT id FROM perfiles_menu_acceso WHERE perfil_id = $1 AND menu_item_id = $2',
+          [perfilId, permiso.menu_item_id]
+        );
+
+        if (existing.rows.length > 0) {
+          // Actualizar
+          await client.query(`
+            UPDATE perfiles_menu_acceso
+            SET 
+              puede_acceder = COALESCE($3, puede_acceder),
+              puede_crear = COALESCE($4, puede_crear),
+              puede_editar = COALESCE($5, puede_editar),
+              puede_eliminar = COALESCE($6, puede_eliminar),
+              puede_finalizar = COALESCE($7, puede_finalizar),
+              puede_completar = COALESCE($8, puede_completar),
+              puede_ver_servicios = COALESCE($9, puede_ver_servicios),
+              actualizado_en = CURRENT_TIMESTAMP
+            WHERE perfil_id = $1 AND menu_item_id = $2
+          `, [
+            perfilId,
+            permiso.menu_item_id,
+            permiso.puede_acceder,
+            permiso.puede_crear,
+            permiso.puede_editar,
+            permiso.puede_eliminar,
+            permiso.puede_finalizar,
+            permiso.puede_completar,
+            permiso.puede_ver_servicios
+          ]);
+        } else {
+          // Insertar
+          await client.query(`
+            INSERT INTO perfiles_menu_acceso (
+              perfil_id,
+              menu_item_id,
+              puede_acceder,
+              puede_crear,
+              puede_editar,
+              puede_eliminar,
+              puede_finalizar,
+              puede_completar,
+              puede_ver_servicios
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `, [
+            perfilId,
+            permiso.menu_item_id,
+            permiso.puede_acceder ?? false,
+            permiso.puede_crear ?? false,
+            permiso.puede_editar ?? false,
+            permiso.puede_eliminar ?? false,
+            permiso.puede_finalizar ?? false,
+            permiso.puede_completar ?? false,
+            permiso.puede_ver_servicios ?? false
+          ]);
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+export default new MenuService();
+

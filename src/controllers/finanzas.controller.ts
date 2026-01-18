@@ -678,21 +678,29 @@ export class FinanzasController {
       const totalConsultas = consultasFiltradas.length;
       
       // Calcular total de ingresos sumando servicios (solo de la moneda filtrada)
-      const totalIngresos = consultasFiltradas.reduce((sum: number, consulta: any) => {
-        const totalConsulta = consulta.servicios_consulta?.reduce((servicioSum: number, servicio: any) => {
-          // Solo sumar servicios de la moneda seleccionada
-          if (moneda && moneda !== 'TODAS') {
+      // IMPORTANTE: Cuando moneda === 'TODAS', NO sumar servicios de diferentes monedas
+      // El totalIngresos solo tiene sentido cuando se filtra por una moneda específica
+      let totalIngresos = 0;
+      if (moneda && moneda !== 'TODAS') {
+        // Solo calcular totalIngresos cuando hay una moneda específica
+        totalIngresos = consultasFiltradas.reduce((sum: number, consulta: any) => {
+          const totalConsulta = consulta.servicios_consulta?.reduce((servicioSum: number, servicio: any) => {
             const monedaServicio = (servicio.moneda_pago || '').toUpperCase().trim();
             const monedaFiltro = moneda.toUpperCase().trim();
             if (monedaServicio !== monedaFiltro) {
               return servicioSum;
             }
-          }
-          const monto = parsearNumero(servicio.monto_pagado);
-          return servicioSum + monto;
-        }, 0) || 0;
-        return sum + totalConsulta;
-      }, 0);
+            const monto = parsearNumero(servicio.monto_pagado);
+            return servicioSum + monto;
+          }, 0) || 0;
+          return sum + totalConsulta;
+        }, 0);
+      } else {
+        // Cuando es 'TODAS', el totalIngresos debe ser 0 o la suma de todos los totales por moneda
+        // (pero esto no tiene sentido porque son monedas diferentes)
+        // Mejor dejarlo en 0 y que se muestren los totales por moneda individualmente
+        totalIngresos = 0;
+      }
       
       const consultasPagadas = consultasFiltradas.filter((c: any) => c.fecha_pago).length;
       const consultasPendientes = totalConsultas - consultasPagadas;
@@ -736,6 +744,7 @@ export class FinanzasController {
       });
 
       // Calcular estadísticas por moneda
+      // Usar consultas sin filtrar para obtener todas las monedas disponibles
       const estadisticasPorMoneda: { [key: string]: any } = {};
       const monedas = [...new Set(consultas?.flatMap((c: any) => 
         c.servicios_consulta?.map((s: any) => (s.moneda_pago || 'VES').toUpperCase().trim()).filter(Boolean) || []
@@ -743,6 +752,8 @@ export class FinanzasController {
 
       monedas.forEach(monedaItem => {
         const monedaItemNormalizada = monedaItem.toUpperCase().trim();
+        
+        // Filtrar consultas que tienen al menos un servicio con esta moneda
         const consultasMoneda = consultas?.filter((consulta: any) => 
           consulta.servicios_consulta?.some((servicio: any) => {
             const monedaServicio = (servicio.moneda_pago || 'VES').toUpperCase().trim();
@@ -750,29 +761,48 @@ export class FinanzasController {
           })
         ) || [];
 
+        // Calcular total de consultas (contar cada consulta una sola vez)
         const totalConsultasMoneda = consultasMoneda.length;
+        
+        // Calcular total de ingresos SOLO de servicios con esta moneda específica
         const totalIngresosMoneda = consultasMoneda.reduce((sum: number, consulta: any) => {
           const totalConsulta = consulta.servicios_consulta?.reduce((servicioSum: number, servicio: any) => {
             const monedaServicio = (servicio.moneda_pago || 'VES').toUpperCase().trim();
+            // Solo sumar servicios que coinciden con la moneda actual
             if (monedaServicio === monedaItemNormalizada) {
               const monto = parsearNumero(servicio.monto_pagado);
-              return servicioSum + monto;
+              // Asegurar que monto sea un número
+              const montoNumerico = typeof monto === 'number' ? monto : parseFloat(String(monto)) || 0;
+              return servicioSum + montoNumerico;
             }
             return servicioSum;
           }, 0) || 0;
-          return sum + totalConsulta;
+          // Asegurar que totalConsulta sea un número
+          const totalConsultaNumerico = typeof totalConsulta === 'number' ? totalConsulta : parseFloat(String(totalConsulta)) || 0;
+          return sum + totalConsultaNumerico;
         }, 0);
+        
+        // Asegurar que totalIngresosMoneda sea un número, no un string
+        const totalIngresosMonedaFinal = typeof totalIngresosMoneda === 'number' ? totalIngresosMoneda : parseFloat(String(totalIngresosMoneda)) || 0;
 
         const consultasPagadasMoneda = consultasMoneda.filter(c => c.fecha_pago).length;
         const consultasPendientesMoneda = totalConsultasMoneda - consultasPagadasMoneda;
 
         estadisticasPorMoneda[monedaItem] = {
           total_consultas: totalConsultasMoneda,
-          total_ingresos: totalIngresosMoneda,
+          total_ingresos: totalIngresosMonedaFinal,
           consultas_pagadas: consultasPagadasMoneda,
           consultas_pendientes: consultasPendientesMoneda,
-          promedio_por_consulta: totalConsultasMoneda > 0 ? totalIngresosMoneda / totalConsultasMoneda : 0
+          promedio_por_consulta: totalConsultasMoneda > 0 ? totalIngresosMonedaFinal / totalConsultasMoneda : 0
         };
+        
+        // Log para debugging
+        console.log(`💰 Estadísticas ${monedaItem}:`, {
+          total_consultas: totalConsultasMoneda,
+          total_ingresos: totalIngresosMonedaFinal,
+          total_ingresos_tipo: typeof totalIngresosMonedaFinal,
+          promedio: totalConsultasMoneda > 0 ? totalIngresosMonedaFinal / totalConsultasMoneda : 0
+        });
       });
 
       const resumen = {

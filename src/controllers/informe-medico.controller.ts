@@ -66,6 +66,7 @@ export class InformeMedicoController {
   obtenerInformes = async (req: Request, res: Response): Promise<void> => {
     try {
       const clinicaAlias = req.clinicaAlias;
+      const user = (req as any).user;
       const {
         medico_id,
         paciente_id,
@@ -81,9 +82,21 @@ export class InformeMedicoController {
         return;
       }
 
+      // Si el usuario es médico, solo puede ver sus propios informes
+      // Si es administrador o secretaria, puede ver todos o filtrar por medico_id si lo especifica
+      let medicoIdFiltro: number | undefined;
+      if (user?.rol === 'medico' && user?.medico_id) {
+        // Médico solo ve sus propios informes
+        medicoIdFiltro = user.medico_id;
+      } else if (medico_id) {
+        // Administrador o secretaria puede filtrar por medico_id si lo especifica en query
+        medicoIdFiltro = parseInt(medico_id as string);
+      }
+      // Si no es médico y no hay medico_id en query, no se filtra (ve todos)
+
       const informes = await informeMedicoService.obtenerInformes({
         clinica_alias: clinicaAlias,
-        ...(medico_id && { medico_id: parseInt(medico_id as string) }),
+        ...(medicoIdFiltro && { medico_id: medicoIdFiltro }),
         ...(paciente_id && { paciente_id: parseInt(paciente_id as string) }),
         ...(estado && { estado: estado as string }),
         ...(tipo_informe && { tipo_informe: tipo_informe as string }),

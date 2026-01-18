@@ -31,6 +31,9 @@ export class PDFService {
             i.*,
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
+            m.cedula as medico_cedula,
+            m.mpps as medico_mpps,
+            m.cm as medico_cm,
             m.especialidad_id,
             e.nombre_especialidad,
             p.nombres as paciente_nombres,
@@ -58,6 +61,9 @@ export class PDFService {
         informe.medicos = {
           nombres: informe.medico_nombres,
           apellidos: informe.medico_apellidos,
+          cedula: informe.medico_cedula || '',
+          mpps: informe.medico_mpps || '',
+          cm: informe.medico_cm || '',
           especialidad: informe.nombre_especialidad || 'Medicina General'
         };
         
@@ -449,11 +455,11 @@ export class PDFService {
           .signature-image {
             max-width: 200px;
             max-height: 100px;
-            border: 1px solid #ddd;
-            background: white;
-            padding: 4px;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: none;
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
+            box-shadow: none;
           }
           
           .signature-text {
@@ -519,7 +525,9 @@ export class PDFService {
             `}
             <div class="signature-text">
               <strong>Dr. ${informe.medicos?.nombres || ''} ${informe.medicos?.apellidos || ''}</strong><br>
-              ${informe.medicos?.especialidad ? `Especialista en ${informe.medicos.especialidad}` : 'Médico'}
+              ${informe.medicos?.especialidad ? `Especialista en ${informe.medicos.especialidad}` : 'Médico'}<br>
+              ${informe.medicos?.cedula ? `Cédula: ${informe.medicos.cedula}` : ''}
+              ${(informe.medicos?.mpps || informe.medicos?.cm) ? `<br>${informe.medicos?.mpps ? `MSDS ${informe.medicos.mpps}` : ''}${informe.medicos?.mpps && informe.medicos?.cm ? ' - ' : ''}${informe.medicos?.cm ? `CMD ${informe.medicos.cm}` : ''}` : ''}
             </div>
           </div>
           
