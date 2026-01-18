@@ -92,15 +92,26 @@ export class EmailService {
       // Procesar el campo "from" según el servicio de email
       let fromEmail = config.email.from;
       
-      // Para Gmail, el campo "from" debe ser el email del usuario autenticado
+      // Para Gmail/Google Workspace, mantener el formato completo "Nombre <email>" para mostrar el alias
       if (config.email.service === 'gmail') {
-        // Si el from tiene formato "Nombre <email>", extraer solo el email
+        // Verificar que el email en el formato "Nombre <email>" coincida con el usuario autenticado
         const emailMatch = config.email.from.match(/<(.+)>/);
         if (emailMatch && emailMatch[1]) {
-          fromEmail = emailMatch[1];
+          // El email debe coincidir con el usuario autenticado, pero mantenemos el formato completo con el nombre
+          const emailInFrom = emailMatch[1];
+          if (emailInFrom === config.email.user) {
+            // Mantener el formato completo "Nombre <email>" para mostrar el alias
+            fromEmail = config.email.from;
+          } else {
+            // Si no coincide, usar solo el email del usuario autenticado
+            fromEmail = config.email.user || emailInFrom;
+          }
         } else if (!config.email.from.includes('@')) {
-          // Si no tiene @, usar el user directamente
+          // Si no tiene formato correcto, usar el user directamente
           fromEmail = config.email.user || config.email.from;
+        } else {
+          // Si ya tiene formato correcto, mantenerlo
+          fromEmail = config.email.from;
         }
         console.log('  - From (procesado para Gmail):', fromEmail);
       } else if (config.email.host) {

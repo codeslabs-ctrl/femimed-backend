@@ -22,18 +22,33 @@ export class FirmaService {
         fs.mkdirSync(dir, { recursive: true });
       }
       
+      // Verificar si el archivo ya está en la ubicación correcta
+      // (multer ya lo guardó en assets/firmas con el nombre correcto)
+      if (archivo.path !== rutaCompleta && fs.existsSync(archivo.path)) {
+        // Si el archivo está en una ubicación temporal, moverlo a la ubicación final
+        if (fs.existsSync(rutaCompleta)) {
+          // Si ya existe un archivo con ese nombre, eliminarlo primero
+          fs.unlinkSync(rutaCompleta);
+        }
+        fs.renameSync(archivo.path, rutaCompleta);
+      }
+      
+      // Verificar que el archivo existe en la ubicación final
+      if (!fs.existsSync(rutaCompleta)) {
+        throw new Error(`No se pudo guardar el archivo en ${rutaCompleta}`);
+      }
+      
       // Calcular hash para verificar integridad
       const hash = crypto.createHash('sha256');
-      hash.update(fs.readFileSync(archivo.path));
+      hash.update(fs.readFileSync(rutaCompleta));
       const hashValue = hash.digest('hex');
       
-      // Mover archivo a ubicación final
-      fs.renameSync(archivo.path, rutaCompleta);
-      
       console.log(`✅ Firma guardada para médico ${medicoId}: ${filename}`);
+      console.log(`📁 Ruta completa: ${rutaCompleta}`);
       console.log(`🔐 Hash de integridad: ${hashValue}`);
       
-      return `/assets/firmas/${filename}`;
+      // Retornar ruta relativa sin el / inicial para compatibilidad multiplataforma
+      return `assets/firmas/${filename}`;
     } catch (error) {
       console.error('❌ Error guardando firma:', error);
       throw new Error(`Error guardando firma: ${(error as Error).message}`);
@@ -76,10 +91,15 @@ export class FirmaService {
     try {
       const firmaPath = await this.obtenerFirma(medicoId);
       if (firmaPath) {
-        const fullPath = path.join(process.cwd(), firmaPath);
+        // Normalizar la ruta: si comienza con /, removerlo; si no, usar tal cual
+        const normalizedPath = firmaPath.startsWith('/') ? firmaPath.substring(1) : firmaPath;
+        const fullPath = path.join(process.cwd(), normalizedPath);
         if (fs.existsSync(fullPath)) {
           fs.unlinkSync(fullPath);
           console.log(`✅ Firma eliminada para médico ${medicoId}`);
+          console.log(`📁 Archivo eliminado: ${fullPath}`);
+        } else {
+          console.warn(`⚠️ Archivo de firma no encontrado para eliminar: ${fullPath}`);
         }
       }
     } catch (error) {
@@ -100,9 +120,14 @@ export class FirmaService {
         return '';
       }
       
-      const fullPath = path.join(process.cwd(), firmaPath);
+      // Normalizar la ruta: si comienza con /, removerlo; si no, usar tal cual
+      const normalizedPath = firmaPath.startsWith('/') ? firmaPath.substring(1) : firmaPath;
+      const fullPath = path.join(process.cwd(), normalizedPath);
+      
       if (!fs.existsSync(fullPath)) {
         console.warn(`⚠️ Archivo de firma no encontrado: ${fullPath}`);
+        console.warn(`   Ruta en BD: ${firmaPath}`);
+        console.warn(`   Ruta normalizada: ${normalizedPath}`);
         return '';
       }
       

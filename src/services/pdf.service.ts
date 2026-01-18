@@ -36,7 +36,9 @@ export class PDFService {
             p.nombres as paciente_nombres,
             p.apellidos as paciente_apellidos,
             p.cedula as paciente_cedula,
-            p.edad as paciente_edad
+            p.edad as paciente_edad,
+            p.telefono as paciente_telefono,
+            p.email as paciente_email
           FROM informes_medicos i
           LEFT JOIN medicos m ON i.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
@@ -76,7 +78,9 @@ export class PDFService {
           nombres: informe.paciente_nombres || '',
           apellidos: informe.paciente_apellidos || '',
           cedula: informe.paciente_cedula || '',
-          edad: edad
+          edad: edad,
+          telefono: informe.paciente_telefono || '',
+          email: informe.paciente_email || ''
         };
         
         console.log('👤 Datos del paciente para PDF:', {
@@ -292,10 +296,10 @@ export class PDFService {
           
           body {
             font-family: 'Arial', sans-serif;
-            line-height: 1.4;
+            line-height: 1.3;
             color: #333;
             background: white;
-            font-size: 11pt;
+            font-size: 10pt;
           }
           
                  .page {
@@ -308,50 +312,52 @@ export class PDFService {
                  
                  .header {
                    text-align: center;
-                   margin-bottom: 4px;
+                   margin-bottom: 2px;
                    border-bottom: none;
-                   padding-bottom: 4px;
+                   padding-bottom: 2px;
                    break-inside: avoid;
                  }
           
                  .logo {
-                   /* Un poco más grande para mejor legibilidad en PDF */
-                   width: 110px;
-                   height: 110px;
-                   margin: 0 auto 6px;
+                   /* Logo más grande para mejor visibilidad */
+                   width: 140px;
+                   height: 140px;
+                   margin: 0 auto 3px;
                    display: block;
                    object-fit: contain;
                    break-inside: avoid;
                  }
           
           .clinic-info {
-            font-size: 9pt;
+            font-size: 8pt;
             color: #666;
-            margin-bottom: 8px;
-            line-height: 1.3;
+            margin-bottom: 3px;
+            line-height: 1.2;
+            white-space: nowrap;
           }
           
           .document-title {
-            font-size: 14pt;
+            font-size: 12pt;
             font-weight: bold;
             color: #E91E63;
-            margin-bottom: 5px;
+            margin-bottom: 2px;
           }
           
           .document-number {
-            font-size: 10pt;
+            font-size: 9pt;
             color: #666;
+            margin-bottom: 3px;
           }
           
           .content {
-            margin: 10px 0;
+            margin: 6px 0;
             text-align: justify;
           }
           
           .content h2 {
             color: #E91E63;
-            margin: 10px 0 6px 0;
-            font-size: 12pt;
+            margin: 8px 0 4px 0;
+            font-size: 11pt;
             font-weight: bold;
             border-bottom: 1px solid #E91E63;
             padding-bottom: 2px;
@@ -361,17 +367,17 @@ export class PDFService {
           
           .content h3 {
             color: #333;
-            margin: 8px 0 5px 0;
-            font-size: 11pt;
+            margin: 6px 0 4px 0;
+            font-size: 10pt;
             font-weight: bold;
             break-after: avoid;
             break-inside: avoid;
           }
           
           .content p {
-            margin-bottom: 6px;
-            text-indent: 15px;
-            line-height: 1.4;
+            margin-bottom: 4px;
+            text-indent: 12px;
+            line-height: 1.3;
             orphans: 3;
             widows: 3;
           }
@@ -379,13 +385,19 @@ export class PDFService {
           .patient-data {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 8px 20px;
-            margin: 10px 0;
-            padding: 12px;
+            gap: 6px 18px;
+            margin: 6px 0;
+            padding: 8px;
             background-color: #f8f9fa;
             border: 1px solid #e9ecef;
             border-left: 3px solid #E91E63;
-            font-size: 10pt;
+            font-size: 9pt;
+          }
+          
+          .patient-data h2 {
+            grid-column: 1 / -1;
+            margin-bottom: 6px;
+            font-size: 11pt;
           }
           
           .patient-data-item {
@@ -396,28 +408,28 @@ export class PDFService {
           .patient-data-label {
             font-weight: bold;
             color: #E91E63;
-            font-size: 9pt;
-            margin-bottom: 2px;
+            font-size: 8pt;
+            margin-bottom: 1px;
           }
           
           .patient-data-value {
             color: #333;
-            font-size: 10pt;
+            font-size: 9pt;
           }
           
           .informe-content {
             display: block;
-            margin: 10px 0;
-            padding: 12px;
+            margin: 6px 0;
+            padding: 8px;
             background-color: #f8f9fa;
             border: 1px solid #e9ecef;
             border-left: 3px solid #E91E63;
-            font-size: 10pt;
-            line-height: 1.4;
+            font-size: 9pt;
+            line-height: 1.3;
           }
           
           .signature-section {
-            margin-top: 22px;
+            margin-top: 12px;
             text-align: center;
             break-inside: avoid;
           }
@@ -425,12 +437,12 @@ export class PDFService {
           .signature-line {
             border-bottom: 1px solid #333;
             width: 150px;
-            margin: 18px auto 5px;
+            margin: 12px auto 4px;
             height: 1px;
           }
           
           .signature-image-container {
-            margin: 20px auto;
+            margin: 12px auto;
             text-align: center;
           }
           
@@ -439,31 +451,31 @@ export class PDFService {
             max-height: 100px;
             border: 1px solid #ddd;
             background: white;
-            padding: 5px;
+            padding: 4px;
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
           }
           
           .signature-text {
-            font-size: 9pt;
+            font-size: 8pt;
             color: #666;
-            margin-top: 3px;
+            margin-top: 2px;
           }
           
           .date-section {
             text-align: right;
-            margin-top: 12px;
-            font-size: 9pt;
+            margin-top: 8px;
+            font-size: 8pt;
             color: #666;
           }
           
           .footer {
-            margin-top: 18px;
+            margin-top: 10px;
             text-align: center;
-            font-size: 8pt;
+            font-size: 7.5pt;
             color: #999;
             border-top: 1px solid #eee;
-            padding-top: 8px;
+            padding-top: 6px;
             break-inside: avoid;
           }
           
@@ -481,11 +493,10 @@ export class PDFService {
             <div class="logo-section">
                      ${clinicaConfig.logo ? 
                        `<img src="${clinicaConfig.logo}" alt="${clinicaConfig.nombre} Logo" class="logo">` :
-                       `<div class="logo-fallback" style="width: 110px; height: 110px; background: ${clinicaConfig.color}; border-radius: 6px; margin: 0 auto 6px; display: flex; align-items: center; justify-content: center; color: white; font-size: 36px; font-weight: bold; box-shadow: 0 1px 4px rgba(0,0,0,0.1);">${clinicaConfig.nombre.charAt(0)}</div>`
+                       `<div class="logo-fallback" style="width: 140px; height: 140px; background: ${clinicaConfig.color}; border-radius: 6px; margin: 0 auto 3px; display: flex; align-items: center; justify-content: center; color: white; font-size: 42px; font-weight: bold; box-shadow: 0 1px 4px rgba(0,0,0,0.1);">${clinicaConfig.nombre.charAt(0)}</div>`
                      }
               <div class="clinic-info">
-                ${clinicaConfig.descripcion}<br>
-                ${clinicaConfig.especialidad}
+                ${clinicaConfig.descripcion} - ${clinicaConfig.especialidad}
               </div>
             </div>
             
@@ -494,7 +505,8 @@ export class PDFService {
           </div>
           
           <div class="content">
-            ${this.procesarContenidoInforme(informe.contenido, informe)}
+            ${this.generarSeccionDatosPaciente(informe.paciente)}
+            ${this.procesarContenidoInforme(informe.contenido)}
           </div>
           
           <div class="signature-section">
@@ -518,6 +530,7 @@ export class PDFService {
           <div class="footer">
             <p>Este documento ha sido generado digitalmente y es válido sin firma autógrafa</p>
             <p>${clinicaConfig.nombre} - ${clinicaConfig.descripcion}</p>
+            <p style="margin-top: 8px; font-size: 7.5pt; color: #888;">Este informe se gestiona desde el módulo "Informes Médicos" del sistema</p>
           </div>
         </div>
       </body>
@@ -526,11 +539,80 @@ export class PDFService {
   }
 
   /**
+   * Escapa caracteres especiales para HTML
+   */
+  private escapeHtml(text: string): string {
+    if (!text) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  /**
+   * Genera la sección de datos del paciente para el PDF
+   */
+  private generarSeccionDatosPaciente(paciente: any): string {
+    if (!paciente) {
+      return '';
+    }
+
+    const nombreCompleto = `${paciente.nombres || ''} ${paciente.apellidos || ''}`.trim();
+    
+    if (!nombreCompleto) {
+      return '';
+    }
+
+    let html = '<div class="patient-data">';
+    html += '<h2>Datos del Paciente</h2>';
+    
+    if (nombreCompleto) {
+      html += '<div class="patient-data-item">';
+      html += '<span class="patient-data-label">Nombre:</span>';
+      html += `<span class="patient-data-value">${this.escapeHtml(nombreCompleto)}</span>`;
+      html += '</div>';
+    }
+    
+    if (paciente.edad) {
+      html += '<div class="patient-data-item">';
+      html += '<span class="patient-data-label">Edad:</span>';
+      html += `<span class="patient-data-value">${this.escapeHtml(String(paciente.edad))} años</span>`;
+      html += '</div>';
+    }
+    
+    if (paciente.cedula) {
+      html += '<div class="patient-data-item">';
+      html += '<span class="patient-data-label">Cédula:</span>';
+      html += `<span class="patient-data-value">${this.escapeHtml(paciente.cedula)}</span>`;
+      html += '</div>';
+    }
+    
+    if (paciente.telefono) {
+      html += '<div class="patient-data-item">';
+      html += '<span class="patient-data-label">Teléfono:</span>';
+      html += `<span class="patient-data-value">${this.escapeHtml(paciente.telefono)}</span>`;
+      html += '</div>';
+    }
+    
+    if (paciente.email) {
+      html += '<div class="patient-data-item">';
+      html += '<span class="patient-data-label">Email:</span>';
+      html += `<span class="patient-data-value">${this.escapeHtml(paciente.email)}</span>`;
+      html += '</div>';
+    }
+    
+    html += '</div>';
+    
+    return html;
+  }
+
+  /**
    * Procesa el contenido del informe para aplicar estilos
    * Mantiene el orden original del contenido sin duplicar datos
-   * Agrega línea descriptiva del paciente antes del Motivo de Consulta
    */
-  private procesarContenidoInforme(contenido: string, informe: any): string {
+  private procesarContenidoInforme(contenido: string): string {
     try {
       if (!contenido) {
         console.warn('⚠️ Contenido vacío recibido en procesarContenidoInforme');
@@ -560,66 +642,6 @@ export class PDFService {
     
     // Limpiar espacios en blanco excesivos
     contenidoProcesado = contenidoProcesado.replace(/\n{3,}/g, '\n\n');
-    
-    // Construir línea descriptiva del paciente
-    let lineaDescriptiva = '';
-    try {
-      if (informe && informe.paciente) {
-        const partes: string[] = [];
-        
-        // Nombre completo
-        const nombreCompleto = `${informe.paciente.nombres || ''} ${informe.paciente.apellidos || ''}`.trim();
-        if (nombreCompleto) {
-          partes.push(nombreCompleto);
-        }
-        
-        // Cédula
-        if (informe.paciente.cedula) {
-          partes.push(`cédula de identidad ${informe.paciente.cedula}`);
-        }
-        
-        // Construir descripción
-        const descripcion: string[] = ['paciente'];
-        if (informe.paciente.edad) {
-          descripcion.push(`de ${informe.paciente.edad} años de edad`);
-        }
-        
-        // Unir todo
-        if (partes.length > 0) {
-          lineaDescriptiva = `${partes.join(', ')}, ${descripcion.join(' ')}.`;
-        } else if (descripcion.length > 1) {
-          lineaDescriptiva = `${descripcion.join(' ')}.`;
-        }
-      }
-    } catch (error: any) {
-      console.warn('⚠️ Error construyendo línea descriptiva del paciente:', error.message);
-      lineaDescriptiva = '';
-    }
-    
-    // Agregar línea descriptiva antes del "Motivo de Consulta" si existe
-    if (lineaDescriptiva) {
-      // Buscar la primera ocurrencia de "Motivo de Consulta"
-      const motivoIndex = contenidoProcesado.search(/<h3><strong>Motivo de Consulta:/i);
-      if (motivoIndex !== -1) {
-        // Buscar hacia atrás desde el Motivo de Consulta para encontrar y eliminar <hr> cercanos
-        const antesDeMotivo = contenidoProcesado.slice(0, motivoIndex);
-        const despuesDeMotivo = contenidoProcesado.slice(motivoIndex);
-        
-        // Eliminar <hr> y espacios en blanco justo antes del Motivo de Consulta
-        const antesLimpio = antesDeMotivo.replace(/(<hr[^>]*>\s*)+$/i, '').trimEnd();
-        
-        // Insertar la línea descriptiva antes del Motivo de Consulta
-        contenidoProcesado = antesLimpio + 
-                            (antesLimpio ? '\n' : '') +
-                            `<p>${lineaDescriptiva}</p>` + 
-                            '\n' +
-                            despuesDeMotivo;
-      } else {
-        // Si no hay Motivo de Consulta, agregar al inicio (eliminando <hr> iniciales)
-        const inicioLimpio = contenidoProcesado.replace(/^(<hr[^>]*>\s*)+/i, '');
-        contenidoProcesado = `<p>${lineaDescriptiva}</p>` + '\n' + inicioLimpio;
-      }
-    }
     
     // Envolver TODO el contenido del informe en un solo contenedor
     contenidoProcesado = `<div class="informe-content">${contenidoProcesado}</div>`;

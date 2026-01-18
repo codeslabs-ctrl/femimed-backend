@@ -72,10 +72,16 @@ export class FirmaController {
       // Actualizar en base de datos (PostgreSQL)
       const updateClient = await postgresPool.connect();
       try {
-        await updateClient.query(
-          'UPDATE medicos SET firma_digital = $1 WHERE id = $2',
+        const updateResult = await updateClient.query(
+          'UPDATE medicos SET firma_digital = $1, fecha_actualizacion = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, firma_digital',
           [rutaFirma, medicoId]
         );
+        
+        if (updateResult.rows.length === 0) {
+          throw new Error('No se pudo actualizar el campo firma_digital en la base de datos');
+        }
+        
+        console.log(`✅ Campo firma_digital actualizado en BD para médico ${medicoId}: ${updateResult.rows[0].firma_digital}`);
       } finally {
         updateClient.release();
       }
