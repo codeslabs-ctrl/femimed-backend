@@ -317,18 +317,24 @@ export class PDFService {
                  }
                  
                  .header {
-                   text-align: center;
+                   display: flex;
+                   align-items: flex-start;
                    margin-bottom: 2px;
                    border-bottom: none;
                    padding-bottom: 2px;
                    break-inside: avoid;
+                   gap: 12px;
+                 }
+          
+                 .logo-section {
+                   flex-shrink: 0;
                  }
           
                  .logo {
                    /* Logo más grande para mejor visibilidad */
                    width: 140px;
                    height: 140px;
-                   margin: 0 auto 3px;
+                   margin: 0 0 3px 0;
                    display: block;
                    object-fit: contain;
                    break-inside: avoid;
@@ -340,6 +346,15 @@ export class PDFService {
             margin-bottom: 3px;
             line-height: 1.2;
             white-space: nowrap;
+            text-align: left;
+          }
+          
+          .header-content {
+            flex: 1;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
           }
           
           .document-title {
@@ -499,15 +514,17 @@ export class PDFService {
             <div class="logo-section">
                      ${clinicaConfig.logo ? 
                        `<img src="${clinicaConfig.logo}" alt="${clinicaConfig.nombre} Logo" class="logo">` :
-                       `<div class="logo-fallback" style="width: 140px; height: 140px; background: ${clinicaConfig.color}; border-radius: 6px; margin: 0 auto 3px; display: flex; align-items: center; justify-content: center; color: white; font-size: 42px; font-weight: bold; box-shadow: 0 1px 4px rgba(0,0,0,0.1);">${clinicaConfig.nombre.charAt(0)}</div>`
+                       `<div class="logo-fallback" style="width: 140px; height: 140px; background: ${clinicaConfig.color}; border-radius: 6px; margin: 0 0 3px 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 42px; font-weight: bold; box-shadow: 0 1px 4px rgba(0,0,0,0.1);">${clinicaConfig.nombre.charAt(0)}</div>`
                      }
               <div class="clinic-info">
                 ${clinicaConfig.descripcion} - ${clinicaConfig.especialidad}
               </div>
             </div>
             
-            <div class="document-title">Informe Médico</div>
-            <div class="document-number">N° ${informe.numero_informe}</div>
+            <div class="header-content">
+              <div class="document-title">Informe Médico</div>
+              <div class="document-number">N° ${informe.numero_informe}</div>
+            </div>
           </div>
           
           <div class="content">
@@ -536,9 +553,7 @@ export class PDFService {
           </div>
           
           <div class="footer">
-            <p>Este documento ha sido generado digitalmente y es válido sin firma autógrafa</p>
-            <p>${clinicaConfig.nombre} - ${clinicaConfig.descripcion}</p>
-            <p style="margin-top: 8px; font-size: 7.5pt; color: #888;">Este informe se gestiona desde el módulo "Informes Médicos" del sistema</p>
+            ${clinicaConfig.direccion ? `<p>${clinicaConfig.direccion}</p>` : ''}
           </div>
         </div>
       </body>
@@ -745,6 +760,7 @@ export class PDFService {
       'femimed': {
         nombre: process.env['CLINICA_NOMBRE'] || 'FemiMed',
         descripcion: process.env['CLINICA_DESCRIPCION'] || 'Centro Médico Especializado',
+        direccion: process.env['CLINICA_DIRECCION'] || '',
         especialidad: 'Ginecología y Obstetricia',
         color: '#E91E63',
         logoPath: process.env['LOGO_PATH'] || './assets/logos/femimed/logo.svg',
@@ -753,6 +769,7 @@ export class PDFService {
       'FemiMed': {
         nombre: process.env['CLINICA_NOMBRE'] || 'FemiMed',
         descripcion: process.env['CLINICA_DESCRIPCION'] || 'Centro Médico de Demostración',
+        direccion: process.env['CLINICA_DIRECCION'] || '',
         especialidad: 'Medicina General',
         color: '#2196F3',
         logoPath: process.env['LOGO_PATH'] || './assets/logos/clinica/logo.webp',
