@@ -104,6 +104,17 @@ export class ConsultaController {
         const result = await client.query(sql, params);
         const consultas = result.rows;
 
+        // Log para depuración: verificar datos del paciente
+        if (consultas.length > 0) {
+          console.log('🔍 Primera consulta desde vista:', {
+            id: consultas[0].id,
+            paciente_id: consultas[0].paciente_id,
+            paciente_nombre: consultas[0].paciente_nombre,
+            paciente_apellidos: consultas[0].paciente_apellidos,
+            paciente_cedula: consultas[0].paciente_cedula
+          });
+        }
+
         res.json({
           success: true,
           data: consultas

@@ -106,31 +106,66 @@ export class MenuService {
       }
 
       const perfilId = perfilResult.rows[0].id;
+      console.log(`🔍 [MenuService] Obteniendo menú para perfil: ${perfilNombre} (ID: ${perfilId})`);
 
       // Obtener items del menú con permisos del perfil
+      // Incluir:
+      // 1. Items opción con puede_acceder = true
+      // 2. Encabezados que tienen al menos un hijo accesible
       const result = await client.query(`
-        SELECT 
-          mi.id,
-          mi.nombre,
-          mi.icono,
-          mi.ruta,
-          mi.orden,
-          mi.activo,
-          mi.padre_id,
-          mi.tipo,
-          mi.es_visible,
-          COALESCE(pma.puede_acceder, false) as puede_acceder
-        FROM menu_items mi
-        LEFT JOIN perfiles_menu_acceso pma ON (
-          mi.id = pma.menu_item_id 
-          AND pma.perfil_id = $1
+        WITH items_con_permisos AS (
+          SELECT 
+            mi.id,
+            mi.nombre,
+            mi.icono,
+            mi.ruta,
+            mi.orden,
+            mi.activo,
+            mi.padre_id,
+            mi.tipo,
+            mi.es_visible,
+            COALESCE(pma.puede_acceder, false) as puede_acceder
+          FROM menu_items mi
+          LEFT JOIN perfiles_menu_acceso pma ON (
+            mi.id = pma.menu_item_id 
+            AND pma.perfil_id = $1
+          )
+          WHERE mi.activo = true
+        ),
+        encabezados_con_hijos_accesibles AS (
+          SELECT DISTINCT e.id
+          FROM items_con_permisos e
+          INNER JOIN items_con_permisos h ON h.padre_id = e.id
+          WHERE e.tipo = 'encabezado'
+            AND h.puede_acceder = true
+            AND h.tipo = 'opcion'
         )
-        WHERE mi.activo = true
-          AND (pma.puede_acceder = true OR mi.padre_id IS NULL)
-        ORDER BY mi.orden, mi.id
+        SELECT 
+          icp.id,
+          icp.nombre,
+          icp.icono,
+          icp.ruta,
+          icp.orden,
+          icp.activo,
+          icp.padre_id,
+          icp.tipo,
+          icp.es_visible,
+          CASE 
+            WHEN icp.tipo = 'encabezado' AND echa.id IS NOT NULL THEN true
+            ELSE icp.puede_acceder
+          END as puede_acceder
+        FROM items_con_permisos icp
+        LEFT JOIN encabezados_con_hijos_accesibles echa ON icp.id = echa.id
+        WHERE 
+          (icp.tipo = 'opcion' AND icp.puede_acceder = true)
+          OR 
+          (icp.tipo = 'encabezado' AND echa.id IS NOT NULL)
+        ORDER BY icp.orden, icp.id
       `, [perfilId]);
 
       const items = result.rows as (MenuItem & { puede_acceder: boolean })[];
+      console.log(`📋 [MenuService] Items obtenidos de la BD: ${items.length}`);
+      console.log(`📋 [MenuService] Items:`, items.map(i => ({ id: i.id, nombre: i.nombre, tipo: i.tipo, padre_id: i.padre_id, puede_acceder: i.puede_acceder })));
       
       // Filtrar solo items accesibles y organizar en jerarquía
       const accessibleItems = items.filter(item => {
@@ -176,6 +211,13 @@ export class MenuService {
         }
         return true;
       });
+
+      console.log(`✅ [MenuService] Menú final organizado: ${filteredRootItems.length} items raíz`);
+      console.log(`✅ [MenuService] Estructura:`, JSON.stringify(filteredRootItems.map(i => ({ 
+        nombre: i.nombre, 
+        tipo: i.tipo, 
+        hijos: i.hijos?.map(h => h.nombre) || [] 
+      })), null, 2));
 
       return filteredRootItems;
     } finally {

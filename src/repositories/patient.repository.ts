@@ -1,4 +1,5 @@
 import { PostgresRepository } from './postgres.repository.js';
+import { PaginationInfo } from '../types/index.js';
 
 export interface PatientData {
   id?: number;
@@ -66,6 +67,96 @@ export class PatientRepository extends PostgresRepository<PatientData> {
       [sexo]
     );
     return result.rows;
+  }
+
+  // Sobrescribir findAll para manejar correctamente los filtros de edad
+  override async findAll(
+    filters: Record<string, any> = {},
+    pagination: { page: number; limit: number } = { page: 1, limit: 10 }
+  ): Promise<{ data: PatientData[]; pagination: PaginationInfo }> {
+    const client = await this.getClient();
+    try {
+      const { page, limit } = pagination;
+      const offset = (page - 1) * limit;
+
+      // Separar filtros de edad de otros filtros
+      const { edad_min, edad_max, ...otherFilters } = filters;
+      
+      // Construir condiciones WHERE
+      const conditions: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      // Filtro de edad mínima
+      if (edad_min !== null && edad_min !== undefined && edad_min !== '') {
+        conditions.push(`edad >= $${paramIndex}`);
+        values.push(Number(edad_min));
+        paramIndex++;
+      }
+
+      // Filtro de edad máxima
+      if (edad_max !== null && edad_max !== undefined && edad_max !== '') {
+        conditions.push(`edad <= $${paramIndex}`);
+        values.push(Number(edad_max));
+        paramIndex++;
+      }
+
+      // Procesar otros filtros
+      Object.entries(otherFilters).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+          if (Array.isArray(value)) {
+            conditions.push(`${key} = ANY($${paramIndex})`);
+            values.push(value);
+            paramIndex++;
+          } else if (typeof value === 'string' && value.includes('%')) {
+            conditions.push(`${key} ILIKE $${paramIndex}`);
+            values.push(value);
+            paramIndex++;
+          } else if (key === 'nombres' || key === 'apellidos') {
+            // Búsqueda parcial para nombres y apellidos
+            conditions.push(`${key} ILIKE $${paramIndex}`);
+            values.push(`%${value}%`);
+            paramIndex++;
+          } else {
+            conditions.push(`${key} = $${paramIndex}`);
+            values.push(value);
+            paramIndex++;
+          }
+        }
+      });
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Count query
+      const countQuery = `SELECT COUNT(*) as total FROM ${this.tableName} ${whereClause}`;
+      const countResult = await client.query(countQuery, values);
+      const total = parseInt(countResult.rows[0].total);
+
+      // Data query
+      const dataQuery = `
+        SELECT * FROM ${this.tableName} 
+        ${whereClause}
+        ORDER BY ${this.idColumn} DESC
+        LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+      `;
+      const dataResult = await client.query(dataQuery, [...values, limit, offset]);
+
+      const paginationInfo: PaginationInfo = {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      };
+
+      return {
+        data: dataResult.rows as PatientData[],
+        pagination: paginationInfo
+      };
+    } catch (error) {
+      throw new Error(`Failed to fetch patients: ${(error as Error).message}`);
+    } finally {
+      client.release();
+    }
   }
 }
 
