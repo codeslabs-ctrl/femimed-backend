@@ -16,39 +16,66 @@ export class FirmaService {
       const filename = `medico_${medicoId}_firma${path.extname(archivo.originalname)}`;
       const rutaCompleta = path.join(process.cwd(), 'assets', 'firmas', filename);
       
+      console.log(`📤 [FirmaService] Guardando firma para médico ${medicoId}`);
+      console.log(`📤 [FirmaService] Nombre de archivo: ${filename}`);
+      console.log(`📤 [FirmaService] Ruta completa esperada: ${rutaCompleta}`);
+      console.log(`📤 [FirmaService] Ruta de multer (archivo.path): ${archivo.path}`);
+      console.log(`📤 [FirmaService] Archivo existe en archivo.path: ${fs.existsSync(archivo.path)}`);
+      
       // Crear directorio si no existe
       const dir = path.dirname(rutaCompleta);
       if (!fs.existsSync(dir)) {
+        console.log(`📁 [FirmaService] Creando directorio: ${dir}`);
         fs.mkdirSync(dir, { recursive: true });
       }
       
-      // Verificar si el archivo ya está en la ubicación correcta
-      // (multer ya lo guardó en assets/firmas con el nombre correcto)
-      if (archivo.path !== rutaCompleta && fs.existsSync(archivo.path)) {
-        // Si el archivo está en una ubicación temporal, moverlo a la ubicación final
-        if (fs.existsSync(rutaCompleta)) {
-          // Si ya existe un archivo con ese nombre, eliminarlo primero
+      // Multer ya guarda el archivo en la ubicación correcta con el nombre correcto
+      // Solo necesitamos verificar que el archivo existe donde multer lo guardó
+      const archivoExiste = fs.existsSync(archivo.path);
+      const rutaCompletaExiste = fs.existsSync(rutaCompleta);
+      
+      console.log(`📤 [FirmaService] Archivo existe en archivo.path: ${archivoExiste}`);
+      console.log(`📤 [FirmaService] Archivo existe en rutaCompleta: ${rutaCompletaExiste}`);
+      
+      // Si multer guardó el archivo en una ubicación diferente, moverlo
+      if (archivo.path !== rutaCompleta && archivoExiste) {
+        console.log(`📤 [FirmaService] Moviendo archivo de ${archivo.path} a ${rutaCompleta}`);
+        if (rutaCompletaExiste) {
+          console.log(`📤 [FirmaService] Eliminando archivo existente en rutaCompleta`);
           fs.unlinkSync(rutaCompleta);
         }
         fs.renameSync(archivo.path, rutaCompleta);
       }
       
       // Verificar que el archivo existe en la ubicación final
-      if (!fs.existsSync(rutaCompleta)) {
-        throw new Error(`No se pudo guardar el archivo en ${rutaCompleta}`);
+      // Primero verificar en archivo.path (donde multer lo guardó)
+      let archivoFinal = archivo.path;
+      if (fs.existsSync(rutaCompleta)) {
+        archivoFinal = rutaCompleta;
+      } else if (!fs.existsSync(archivo.path)) {
+        // Error simplificado para el usuario, detalles técnicos en logs
+        console.error(`❌ [FirmaService] Archivo no encontrado después de multer:`);
+        console.error(`   - archivo.path: ${archivo.path}`);
+        console.error(`   - rutaCompleta: ${rutaCompleta}`);
+        throw new Error('No se pudo guardar el archivo');
       }
+      
+      console.log(`✅ [FirmaService] Archivo encontrado en: ${archivoFinal}`);
       
       // Calcular hash para verificar integridad
       const hash = crypto.createHash('sha256');
-      hash.update(fs.readFileSync(rutaCompleta));
+      hash.update(fs.readFileSync(archivoFinal));
       const hashValue = hash.digest('hex');
       
       console.log(`✅ Firma guardada para médico ${medicoId}: ${filename}`);
-      console.log(`📁 Ruta completa: ${rutaCompleta}`);
+      console.log(`📁 Ruta completa: ${archivoFinal}`);
       console.log(`🔐 Hash de integridad: ${hashValue}`);
       
       // Retornar ruta relativa sin el / inicial para compatibilidad multiplataforma
-      return `assets/firmas/${filename}`;
+      // Normalizar la ruta para que siempre sea relativa desde process.cwd()
+      const rutaRelativa = path.relative(process.cwd(), archivoFinal).replace(/\\/g, '/');
+      console.log(`📤 [FirmaService] Ruta relativa retornada: ${rutaRelativa}`);
+      return rutaRelativa;
     } catch (error) {
       console.error('❌ Error guardando firma:', error);
       throw new Error(`Error guardando firma: ${(error as Error).message}`);

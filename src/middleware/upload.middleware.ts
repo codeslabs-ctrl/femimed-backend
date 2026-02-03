@@ -5,7 +5,9 @@ import fs from 'fs';
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     const uploadPath = path.join(process.cwd(), 'assets', 'firmas');
+    console.log(`📤 [Multer] Destino de upload: ${uploadPath}`);
     if (!fs.existsSync(uploadPath)) {
+      console.log(`📁 [Multer] Creando directorio: ${uploadPath}`);
       fs.mkdirSync(uploadPath, { recursive: true });
     }
     cb(null, uploadPath);
@@ -14,6 +16,8 @@ const storage = multer.diskStorage({
     const medicoId = req.params['id'];
     const ext = path.extname(file.originalname);
     const filename = `medico_${medicoId}_firma${ext}`;
+    console.log(`📤 [Multer] Nombre de archivo generado: ${filename}`);
+    console.log(`📤 [Multer] Archivo original: ${file.originalname}, MIME: ${file.mimetype}, Tamaño: ${file.size}`);
     cb(null, filename);
   }
 });

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { FirmaService } from '../services/firma.service.js';
 import { postgresPool } from '../config/database.js';
 import { ApiResponse } from '../types/index.js';
+import fs from 'fs';
+import path from 'path';
 
 export class FirmaController {
   private firmaService: FirmaService;
@@ -34,6 +36,7 @@ export class FirmaController {
       }
       
       if (!req.file) {
+        console.error('❌ [FirmaController] No se recibió archivo en req.file');
         res.status(400).json({
           success: false,
           error: { message: 'No se proporcionó archivo de firma' }
@@ -41,12 +44,21 @@ export class FirmaController {
         return;
       }
       
+      console.log(`📤 [FirmaController] Archivo recibido:`);
+      console.log(`   - originalname: ${req.file.originalname}`);
+      console.log(`   - filename: ${req.file.filename}`);
+      console.log(`   - path: ${req.file.path}`);
+      console.log(`   - size: ${req.file.size}`);
+      console.log(`   - mimetype: ${req.file.mimetype}`);
+      console.log(`   - Archivo existe físicamente: ${require('fs').existsSync(req.file.path)}`);
+      
       // Verificar que el médico existe (PostgreSQL)
       const client = await postgresPool.connect();
       let medico: any;
+      let firmaAnterior: string | null = null;
       try {
         const result = await client.query(
-          'SELECT id, nombres, apellidos FROM medicos WHERE id = $1 LIMIT 1',
+          'SELECT id, nombres, apellidos, firma_digital FROM medicos WHERE id = $1 LIMIT 1',
           [medicoId]
         );
         
@@ -59,15 +71,29 @@ export class FirmaController {
         }
         
         medico = result.rows[0];
+        firmaAnterior = medico.firma_digital || null;
       } finally {
         client.release();
       }
       
-      // Eliminar firma anterior si existe
-      await this.firmaService.eliminarFirma(medicoId);
-      
-      // Guardar nueva firma
+      // Guardar nueva firma PRIMERO (antes de eliminar la anterior)
       const rutaFirma = await this.firmaService.guardarFirma(medicoId, req.file);
+      
+      // Eliminar archivo de firma anterior solo si existe y es diferente a la nueva
+      if (firmaAnterior && firmaAnterior !== rutaFirma) {
+        try {
+          // Normalizar la ruta: si comienza con /, removerlo; si no, usar tal cual
+          const normalizedPath = firmaAnterior.startsWith('/') ? firmaAnterior.substring(1) : firmaAnterior;
+          const fullPath = path.join(process.cwd(), normalizedPath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+            console.log(`✅ Archivo de firma anterior eliminado: ${fullPath}`);
+          }
+        } catch (error) {
+          console.error('⚠️ Error eliminando firma anterior (no crítico):', error);
+          // No fallar la operación si no se puede eliminar la firma anterior
+        }
+      }
       
       // Actualizar en base de datos (PostgreSQL)
       const updateClient = await postgresPool.connect();
@@ -101,9 +127,14 @@ export class FirmaController {
       
     } catch (error) {
       console.error('❌ Error en subirFirma:', error);
+      // Mensaje amigable para el usuario, sin detalles técnicos
+      const errorMessage = (error as Error).message.includes('No se pudo guardar el archivo') 
+        ? 'No se pudo guardar la firma digital. Por favor, intente nuevamente.'
+        : 'Error al subir la firma digital. Por favor, intente nuevamente.';
+      
       res.status(500).json({
         success: false,
-        error: { message: (error as Error).message }
+        error: { message: errorMessage }
       } as ApiResponse<null>);
     }
   }

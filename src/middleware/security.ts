@@ -14,7 +14,11 @@ declare global {
 }
 
 // Headers de seguridad
-export const securityHeaders = helmet();
+// Deshabilitar CORP en Helmet - lo manejamos manualmente en el middleware de archivos estáticos
+export const securityHeaders = helmet({
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false
+});
 
 // CORS configurado para FemiMed
 // - Acepta una lista separada por comas en CORS_ORIGIN (recomendado para producción)
@@ -38,7 +42,8 @@ const allowedOrigins = Array.from(new Set([
   // FallBacks / compat
   'https://femimed.codes-labs.com',
   'https://www.femimed.codes-labs.com',
-  'http://localhost:4200'
+  'http://localhost:4200',
+  'http://localhost:3000'  // Desarrollo frontend alternativo
 ].map(normalizeOrigin)));
 
 export const corsMiddleware = cors({
