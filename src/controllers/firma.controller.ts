@@ -187,6 +187,80 @@ export class FirmaController {
   }
   
   /**
+   * Sirve la imagen de la firma digital de un médico
+   */
+  async servirFirma(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        res.status(400).json({
+          success: false,
+          error: { message: 'ID de médico requerido' }
+        } as ApiResponse<null>);
+        return;
+      }
+      const medicoId = parseInt(id);
+      
+      if (isNaN(medicoId) || medicoId <= 0) {
+        res.status(400).json({
+          success: false,
+          error: { message: 'ID de médico inválido' }
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      const rutaFirma = await this.firmaService.obtenerFirma(medicoId);
+      
+      if (!rutaFirma) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Firma digital no encontrada' }
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      // Normalizar la ruta y construir la ruta completa
+      const normalizedPath = rutaFirma.startsWith('/') ? rutaFirma.substring(1) : rutaFirma;
+      const fullPath = require('path').join(process.cwd(), normalizedPath);
+      
+      if (!require('fs').existsSync(fullPath)) {
+        res.status(404).json({
+          success: false,
+          error: { message: 'Archivo de firma no encontrado' }
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      // Establecer headers CORS y CORP
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      
+      // Determinar el tipo de contenido
+      const ext = require('path').extname(fullPath).toLowerCase();
+      const contentTypeMap: { [key: string]: string } = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+      };
+      const contentType = contentTypeMap[ext] || 'application/octet-stream';
+      
+      res.setHeader('Content-Type', contentType);
+      res.sendFile(fullPath);
+      
+    } catch (error) {
+      console.error('❌ Error en servirFirma:', error);
+      res.status(500).json({
+        success: false,
+        error: { message: 'Error al servir la firma digital' }
+      } as ApiResponse<null>);
+    }
+  }
+  
+  /**
    * Elimina la firma digital de un médico
    */
   async eliminarFirma(req: Request, res: Response): Promise<void> {

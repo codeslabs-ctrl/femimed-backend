@@ -18,6 +18,11 @@ router.post('/:id/subir',
   (req: any, res: any) => firmaController.subirFirma(req, res)
 );
 
+// GET /api/v1/firmas/:id/imagen - Servir imagen de la firma digital (sin autenticación para imágenes)
+router.get('/:id/imagen', 
+  (req: any, res: any) => firmaController.servirFirma(req, res)
+);
+
 // GET /api/v1/firmas/:id - Obtener firma digital
 router.get('/:id', 
   authenticateToken, 
