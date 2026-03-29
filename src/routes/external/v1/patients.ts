@@ -20,7 +20,6 @@ function normalizeText(raw: unknown): string {
 }
 
 function isValidEmail(raw: string): boolean {
-  // Validación simple (suficiente para preregistro); evita regex RFC compleja.
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
 }
 
@@ -52,7 +51,6 @@ function normalizeSexo(raw: unknown): 'Masculino' | 'Femenino' | 'Otro' | null {
 }
 
 // POST /api/v1/external/v1/patients/pre-register
-// Objetivo: permitir preregistro con datos mínimos para poder crear solicitudes aunque el paciente no exista aún.
 router.post('/pre-register', async (req: Request, res: Response<ApiResponse>) => {
   try {
     const cedula = normalizeCedula((req.body as any)?.cedula);
@@ -96,7 +94,6 @@ router.post('/pre-register', async (req: Request, res: Response<ApiResponse>) =>
 
     const client = await postgresPool.connect();
     try {
-      // 1) Buscar por cédula normalizada dentro de esta clínica (si aplica).
       const existing = await client.query(
         `SELECT id, nombres, apellidos, cedula, email, telefono, activo, clinica_alias
          FROM pacientes
@@ -109,7 +106,6 @@ router.post('/pre-register', async (req: Request, res: Response<ApiResponse>) =>
 
       if (existing.rows.length > 0) {
         const id = existing.rows[0].id;
-        // 2) Actualizar (incluye edad/sexo para cumplir constraints y mantener datos consistentes).
         const updated = await client.query(
           `UPDATE pacientes
            SET nombres = $1,
@@ -129,7 +125,6 @@ router.post('/pre-register', async (req: Request, res: Response<ApiResponse>) =>
         return;
       }
 
-      // 3) Crear nuevo paciente. Nota: la tabla tiene CHECK constraints (edad/sexo).
       const created = await client.query(
         `INSERT INTO pacientes
            (nombres, apellidos, edad, sexo, email, telefono, cedula, activo, clinica_alias, fecha_creacion, fecha_actualizacion)
@@ -141,7 +136,6 @@ router.post('/pre-register', async (req: Request, res: Response<ApiResponse>) =>
 
       res.status(201).json({ success: true, data: { created: true, patient: created.rows[0] } });
     } catch (dbErr: any) {
-      // Unique email constraint
       if (dbErr?.code === '23505') {
         res.status(409).json({ success: false, error: { message: 'El email ya está registrado en esta clínica' } });
         return;
@@ -161,8 +155,6 @@ router.post('/lookup', async (req: Request, res: Response<ApiResponse>) => {
     const cedula = normalizeCedula((req.body as any)?.cedula);
     const cedulaDigits = cedula.replace(/^[VP]/, '');
 
-    // En BD la cédula puede venir con guiones/puntos; ya se normaliza a VP+digitos.
-    // Se aceptan longitudes comunes (7 a 10 dígitos).
     if (!/^[VP][0-9]{7,10}$/.test(cedula)) {
       res.status(400).json({
         success: false,
@@ -198,7 +190,6 @@ router.post('/lookup', async (req: Request, res: Response<ApiResponse>) => {
         return;
       }
 
-      // Si hay varios registros con la misma cédula, devolvemos todos.
       res.json({
         success: true,
         data: {

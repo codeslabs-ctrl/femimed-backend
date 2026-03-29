@@ -48,13 +48,17 @@ export class ContextualDataController {
         return;
       }
 
+      const maxControles = req.query['maxControles'] != null ? parseInt(String(req.query['maxControles']), 10) : undefined;
+      const options = (maxControles != null && !isNaN(maxControles) && maxControles > 0) ? { maxControles } : undefined;
+
       console.log(`✅ Parámetros validados - Paciente: ${pacienteIdNum}, Médico: ${medicoIdNum}, Clínica: ${clinicaAlias}`);
       console.log('🔄 Llamando a contextualDataService.obtenerDatosContextuales...');
 
       const datosContextuales = await contextualDataService.obtenerDatosContextuales(
         pacienteIdNum, 
         medicoIdNum, 
-        clinicaAlias
+        clinicaAlias,
+        options
       );
 
       console.log('✅ Datos contextuales obtenidos exitosamente, enviando respuesta');

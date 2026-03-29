@@ -25,8 +25,8 @@ export const requireRole = (allowedRoles: string[]) => {
   };
 };
 
-// Middleware específico para finanzas
-export const requireFinanzasRole = requireRole(['finanzas', 'administrador']);
+// Middleware específico para finanzas (admin y finanzas ven todo; médico solo sus datos)
+export const requireFinanzasRole = requireRole(['finanzas', 'administrador', 'medico']);
 
 // Middleware específico para médicos
 export const requireMedicoRole = requireRole(['medico', 'administrador']);

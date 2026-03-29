@@ -2,12 +2,26 @@ import { postgresPool } from '../config/database.js';
 
 type PreferenceKey = string;
 
+let ensured = false;
+async function ensureUserPreferencesTable(): Promise<void> {
+  if (ensured) return;
+  ensured = true;
+
+  await postgresPool.query(`
+    CREATE TABLE IF NOT EXISTS public.parametros_usuario (
+      usuario_id INT4 NOT NULL,
+      clave VARCHAR(100) NOT NULL,
+      valor JSONB NOT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT now(),
+      PRIMARY KEY (usuario_id, clave)
+    );
+  `);
+}
+
 export class UserPreferencesService {
-  /**
-   * Obtiene todas las preferencias del usuario.
-   * Retorna un objeto plano (clave -> valor) para facilitar consumo en frontend.
-   */
   async getPreferences(userId: number): Promise<Record<string, any>> {
+    await ensureUserPreferencesTable();
+
     const result = await postgresPool.query(
       `SELECT clave, valor
        FROM parametros_usuario
@@ -20,7 +34,6 @@ export class UserPreferencesService {
       const key = String(row.clave);
       const value = row.valor;
 
-      // Normalizar "pagina_principal" a un string (route) si viene como {route:"/x"}
       if (key === 'pagina_principal' && value && typeof value === 'object' && typeof value.route === 'string') {
         prefs[key] = value.route;
       } else {
@@ -31,11 +44,9 @@ export class UserPreferencesService {
     return prefs;
   }
 
-  /**
-   * Guarda/actualiza una preferencia (UPSERT).
-   * Para "pagina_principal" aceptamos un string y lo almacenamos como JSONB {route:"/ruta"}.
-   */
   async setPreference(userId: number, key: PreferenceKey, value: any): Promise<{ key: string; value: any }> {
+    await ensureUserPreferencesTable();
+
     const normalizedKey = String(key).trim();
     if (!normalizedKey) throw new Error('La clave es requerida');
     if (normalizedKey.length > 100) throw new Error('La clave es demasiado larga');

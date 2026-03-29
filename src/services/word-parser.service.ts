@@ -161,6 +161,8 @@ export class WordParserService {
     const fechaConsulta = this.extractFechaConsulta(fullText);
     if (fechaConsulta) {
       historia.fecha_consulta = fechaConsulta;
+    } else {
+      console.warn('⚠️ No se encontró fecha de consulta en esta sección del documento');
     }
 
     // Extraer datos del médico (si están disponibles)
@@ -408,7 +410,7 @@ export class WordParserService {
     const parts: string[] = [];
 
     if (historia.motivo_consulta) {
-      parts.push(`<p><strong>Motivo de Consulta:</strong> ${historia.motivo_consulta}</p>`);
+      parts.push(`<p><strong>Resumen Clínico:</strong> ${historia.motivo_consulta}</p>`);
     }
 
     if (historia.antecedentes_personales) {

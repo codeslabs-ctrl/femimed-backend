@@ -30,7 +30,12 @@ const authSchemas = {
 };
 
 // Auth routes con middlewares de seguridad
-router.post('/login', validateLogin, (req, res) => authController.login(req, res));
+router.post('/login', (req, _res, next) => {
+  console.log('📥 Petición de login recibida');
+  console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('📋 Body:', JSON.stringify(req.body, null, 2));
+  next();
+}, validateLogin, (req, res) => authController.login(req, res));
 router.post('/regenerate-otp', validateRequest(authSchemas.regenerateOTP), (req, res) => authController.regenerateOTP(req, res));
 router.post('/change-password', authSecurityMiddleware, validateRequest(authSchemas.changePassword), (req: any, res: any) => authController.changePassword(req, res));
 

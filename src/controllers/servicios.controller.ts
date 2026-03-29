@@ -62,7 +62,9 @@ export class ServiciosController {
       const { nombre_servicio, especialidad_id, monto_base, moneda, descripcion } = req.body;
 
       // Validaciones
-      if (!nombre_servicio || !especialidad_id || !monto_base || !moneda) {
+      // monto_base puede ser 0, no usar !monto_base
+      const montoValido = monto_base !== undefined && monto_base !== null && monto_base !== '';
+      if (!nombre_servicio || !especialidad_id || !montoValido || !moneda) {
         return res.status(400).json({ 
           success: false, 
           error: 'Faltan campos requeridos: nombre_servicio, especialidad_id, monto_base, moneda' 

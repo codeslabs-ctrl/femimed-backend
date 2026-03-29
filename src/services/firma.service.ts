@@ -4,7 +4,46 @@ import crypto from 'crypto';
 import { postgresPool } from '../config/database.js';
 
 export class FirmaService {
-  
+  /**
+   * Ruta en BD (ej. assets/firmas/medico_1_firma.png) → archivo en disco.
+   * Prueba varias raíces: cwd, cwd/backend, raíz del paquete API (donde están dist/ y assets/).
+   * Evita que la firma/sello no carguen en el PDF si node se ejecuta desde otra carpeta (común en DrAnderson vs DemoMed).
+   */
+  private resolveStoredFilePath(storedPath: string): string | null {
+    if (!storedPath || typeof storedPath !== 'string') return null;
+    const trimmed = storedPath.trim();
+    if (!trimmed) return null;
+    if (path.isAbsolute(trimmed)) {
+      const abs = path.normalize(trimmed);
+      if (fs.existsSync(abs)) return abs;
+      return null;
+    }
+    const normalized = trimmed.replace(/^\/+/, '').replace(/\\/g, '/');
+    const packageRoot = path.join(__dirname, '..', '..');
+    const candidates = [
+      path.join(process.cwd(), normalized),
+      path.join(process.cwd(), 'backend', normalized),
+      path.join(packageRoot, normalized),
+      path.join(packageRoot, 'dist', normalized),
+      path.join(packageRoot, '..', normalized)
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p;
+    }
+    return null;
+  }
+
+  /** Si la BD no tiene ruta o apunta mal, busca medico_{id}_firma.* / _sello.* en assets (mismo nombre que guardarFirma). */
+  private findFirmaSelloByConvention(medicoId: number, kind: 'firma' | 'sello'): string | null {
+    const exts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+    const base = `assets/firmas/medico_${medicoId}_${kind}`;
+    for (const ext of exts) {
+      const resolved = this.resolveStoredFilePath(`${base}${ext}`);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
   /**
    * Guarda la firma digital de un médico
    * @param medicoId ID del médico
@@ -81,6 +120,28 @@ export class FirmaService {
       throw new Error(`Error guardando firma: ${(error as Error).message}`);
     }
   }
+
+  /**
+   * Guarda el sello húmedo de un médico en la misma carpeta que la firma (assets/firmas)
+   */
+  async guardarSello(medicoId: number, archivo: Express.Multer.File): Promise<string> {
+    try {
+      const filename = `medico_${medicoId}_sello${path.extname(archivo.originalname)}`;
+      const rutaCompleta = path.join(process.cwd(), 'assets', 'firmas', filename);
+      const dir = path.dirname(rutaCompleta);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (archivo.path !== rutaCompleta && fs.existsSync(archivo.path)) {
+        if (fs.existsSync(rutaCompleta)) fs.unlinkSync(rutaCompleta);
+        fs.renameSync(archivo.path, rutaCompleta);
+      }
+      const archivoFinal = fs.existsSync(rutaCompleta) ? rutaCompleta : archivo.path;
+      if (!fs.existsSync(archivoFinal)) throw new Error('No se pudo guardar el archivo del sello');
+      return path.relative(process.cwd(), archivoFinal).replace(/\\/g, '/');
+    } catch (error) {
+      console.error('❌ Error guardando sello:', error);
+      throw new Error(`Error guardando sello: ${(error as Error).message}`);
+    }
+  }
   
   /**
    * Obtiene la ruta de la firma digital de un médico
@@ -143,33 +204,75 @@ export class FirmaService {
   async obtenerFirmaBase64(medicoId: number): Promise<string> {
     try {
       const firmaPath = await this.obtenerFirma(medicoId);
-      if (!firmaPath) {
+      let fullPath = firmaPath ? this.resolveStoredFilePath(firmaPath) : null;
+      if (!fullPath) {
+        fullPath = this.findFirmaSelloByConvention(medicoId, 'firma');
+      }
+      if (!fullPath) {
+        if (firmaPath) {
+          console.warn(`⚠️ Archivo de firma no encontrado. Ruta en BD: ${firmaPath} | cwd: ${process.cwd()}`);
+        }
         return '';
       }
-      
-      // Normalizar la ruta: si comienza con /, removerlo; si no, usar tal cual
-      const normalizedPath = firmaPath.startsWith('/') ? firmaPath.substring(1) : firmaPath;
-      const fullPath = path.join(process.cwd(), normalizedPath);
-      
-      if (!fs.existsSync(fullPath)) {
-        console.warn(`⚠️ Archivo de firma no encontrado: ${fullPath}`);
-        console.warn(`   Ruta en BD: ${firmaPath}`);
-        console.warn(`   Ruta normalizada: ${normalizedPath}`);
-        return '';
-      }
-      
+
       const firmaBuffer = fs.readFileSync(fullPath);
       const base64 = firmaBuffer.toString('base64');
-      const ext = path.extname(firmaPath).toLowerCase();
-      
+      const ext = path.extname(fullPath).toLowerCase();
+
       let mimeType = 'image/png';
       if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
       else if (ext === '.gif') mimeType = 'image/gif';
       else if (ext === '.webp') mimeType = 'image/webp';
-      
+
       return `data:${mimeType};base64,${base64}`;
     } catch (error) {
       console.error('❌ Error obteniendo firma base64:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Obtiene la ruta del sello húmedo del médico (columna sello_humedo en medicos).
+   */
+  async obtenerSello(medicoId: number): Promise<string | null> {
+    try {
+      const client = await postgresPool.connect();
+      try {
+        const result = await client.query(
+          'SELECT sello_humedo FROM medicos WHERE id = $1 LIMIT 1',
+          [medicoId]
+        );
+        if (result.rows.length === 0) return null;
+        return result.rows[0].sello_humedo ?? null;
+      } finally {
+        client.release();
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Convierte el sello húmedo a base64 para el PDF. Si la columna sello_humedo no existe, retorna ''.
+   */
+  async obtenerSelloBase64(medicoId: number): Promise<string> {
+    try {
+      const selloPath = await this.obtenerSello(medicoId);
+      let fullPath =
+        selloPath && typeof selloPath === 'string' ? this.resolveStoredFilePath(selloPath) : null;
+      if (!fullPath) {
+        fullPath = this.findFirmaSelloByConvention(medicoId, 'sello');
+      }
+      if (!fullPath) return '';
+      const buf = fs.readFileSync(fullPath);
+      const base64 = buf.toString('base64');
+      const ext = path.extname(fullPath).toLowerCase();
+      let mimeType = 'image/png';
+      if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+      else if (ext === '.gif') mimeType = 'image/gif';
+      else if (ext === '.webp') mimeType = 'image/webp';
+      return `data:${mimeType};base64,${base64}`;
+    } catch {
       return '';
     }
   }

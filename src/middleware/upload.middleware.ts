@@ -22,18 +22,33 @@ const storage = multer.diskStorage({
   }
 });
 
+const storageSello = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const uploadPath = path.join(process.cwd(), 'assets', 'firmas');
+    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const medicoId = req.params['id'];
+    const ext = path.extname(file.originalname);
+    cb(null, `medico_${medicoId}_sello${ext}`);
+  }
+});
+
 export const uploadFirma = multer({
   storage,
-  limits: { 
-    fileSize: 2 * 1024 * 1024, // 2MB max
-    files: 1 // Solo un archivo
-  },
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
-    // Solo permitir archivos de imagen
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Solo se permiten archivos de imagen (PNG, JPG, JPEG, GIF, WEBP)'));
-    }
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Solo se permiten archivos de imagen (PNG, JPG, JPEG, GIF, WEBP)'));
+  }
+});
+
+export const uploadSello = multer({
+  storage: storageSello,
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Solo se permiten archivos de imagen (PNG, JPG, JPEG, GIF, WEBP)'));
   }
 });

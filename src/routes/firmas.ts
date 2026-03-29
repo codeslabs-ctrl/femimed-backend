@@ -1,6 +1,6 @@
 import express from 'express';
 import { FirmaController } from '../controllers/firma.controller.js';
-import { uploadFirma } from '../middleware/upload.middleware.js';
+import { uploadFirma, uploadSello } from '../middleware/upload.middleware.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { medicoSecurityMiddleware } from '../middleware/security.js';
 
@@ -17,6 +17,28 @@ router.post('/:id/subir',
   uploadFirma.single('firma'), 
   (req: any, res: any) => firmaController.subirFirma(req, res)
 );
+
+// POST /api/v1/firmas/:id/sello/subir - Subir sello húmedo (misma carpeta que la firma)
+router.post('/:id/sello/subir',
+  authenticateToken,
+  medicoSecurityMiddleware,
+  (req: any, res: any, next: any) => {
+    uploadSello.single('sello')(req, res, (err: any) => {
+      if (err) {
+        console.error('❌ [firmas] Error Multer (sello):', err);
+        return res.status(400).json({
+          success: false,
+          error: { message: err.message || 'Error al subir el archivo del sello. Verifique que sea una imagen (PNG, JPG, máx. 2MB).' }
+        });
+      }
+      next();
+    });
+  },
+  (req: any, res: any) => firmaController.subirSello(req, res)
+);
+
+// GET /api/v1/firmas/:id/sello/imagen - Servir imagen del sello húmedo
+router.get('/:id/sello/imagen', (req: any, res: any) => firmaController.servirSello(req, res));
 
 // GET /api/v1/firmas/:id/imagen - Servir imagen de la firma digital (sin autenticación para imágenes)
 router.get('/:id/imagen', 

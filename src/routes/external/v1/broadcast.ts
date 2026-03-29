@@ -1,12 +1,12 @@
 import express, { Request, Response } from 'express';
-import { requireExternalApiKey } from '../../../middleware/external-api-key.js';
 import { ApiResponse } from '../../../types/index.js';
+import { requireExternalApiKey } from '../../../middleware/external-api-key.js';
 import { postgresPool } from '../../../config/database.js';
 import { EmailService } from '../../../services/email.service.js';
 
 const router = express.Router();
 
-// API Key para automatizaciones (N8N)
+// API Key para automatización (N8N u otros)
 router.use(requireExternalApiKey('EXTERNAL_N8N_API_KEYS'));
 
 // GET /api/v1/external/v1/broadcast/whatsapp

@@ -36,7 +36,7 @@ export const testPostgresConnection = async (): Promise<boolean> => {
   let timeoutId: NodeJS.Timeout | null = null;
   
   try {
-    console.log('ðŸ”„ Testing PostgreSQL connection...');
+    console.log('🔄 Testing PostgreSQL connection...');
     console.log(`   Host: ${postgresConfig.host}`);
     console.log(`   Port: ${postgresConfig.port}`);
     console.log(`   Database: ${postgresConfig.database}`);
@@ -56,7 +56,7 @@ export const testPostgresConnection = async (): Promise<boolean> => {
     if (timeoutId) clearTimeout(timeoutId);
     const result = await client.query('SELECT NOW() as current_time, version() as version');
     
-    console.log('âœ… PostgreSQL connection successful!');
+    console.log('✅ PostgreSQL connection successful!');
     console.log(`   Server time: ${result.rows[0].current_time}`);
     console.log(`   PostgreSQL version: ${result.rows[0].version.split(',')[0]}`);
     
@@ -67,14 +67,14 @@ export const testPostgresConnection = async (): Promise<boolean> => {
     );
     
     if (dbResult.rows.length > 0) {
-      console.log(`âœ… Database '${postgresConfig.database}' exists`);
+      console.log(`✅ Database '${postgresConfig.database}' exists`);
     } else {
-      console.log(`âš ï¸  Database '${postgresConfig.database}' not found`);
+      console.log(`⚠️  Database '${postgresConfig.database}' not found`);
     }
     
     return true;
   } catch (error: any) {
-    console.error('âŒ PostgreSQL connection failed:');
+    console.error('❌ PostgreSQL connection failed:');
     const errorCode = error.code || error.errno;
     const errorMessage = error.message || String(error);
     
@@ -90,7 +90,7 @@ export const testPostgresConnection = async (): Promise<boolean> => {
       console.error('   Authentication failed. Check username and password.');
     } else if (errorCode === '3D000') {
       console.error(`   Database '${postgresConfig.database}' does not exist.`);
-      console.error('   Create it with: CREATE DATABASE femimed_db;');
+      console.error('   Create it with: CREATE DATABASE demomed_db;');
     } else {
       console.error(`   Error code: ${errorCode || 'N/A'}`);
       console.error(`   Error message: ${errorMessage}`);
@@ -106,7 +106,7 @@ export const testPostgresConnection = async (): Promise<boolean> => {
 
 // Test connection function - always uses PostgreSQL
 export const testConnection = async (): Promise<void> => {
-  console.log('ðŸ”§ Using PostgreSQL');
+  console.log('🔧 Using PostgreSQL');
   const success = await testPostgresConnection();
   if (!success) {
     throw new Error('PostgreSQL connection test failed');

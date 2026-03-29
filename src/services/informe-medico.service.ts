@@ -15,6 +15,7 @@ export interface InformeMedico {
   fecha_actualizacion: Date;
   fecha_envio?: Date | string;
   clinica_alias: string;
+  clinica_atencion_id?: number | null;
   observaciones?: string;
   numero_secuencial?: number;
   creado_por: number;
@@ -60,6 +61,26 @@ export class InformeMedicoService {
   // INFORMES MÉDICOS
   // =====================================================
 
+  /**
+   * Limpia el contenido antes de guardar en BD: quita bloques de firma y nombre del médico al final.
+   * El nombre del médico ya se muestra en el bloque de firma del PDF, no debe persistirse en contenido.
+   */
+  private limpiarContenidoParaGuardar(contenido: string | undefined): string {
+    if (!contenido || typeof contenido !== 'string') return contenido ?? '';
+    let out = contenido;
+    // Bloques de firma (el frontend los añade al guardar; no los persistimos)
+    out = out.replace(/<div[^>]*class="[^"]*firma-sistema[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi, '');
+    out = out.replace(/<div[^>]*class="[^"]*firma-personalizada[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi, '');
+    out = out.replace(/<div[^>]*class="[^"]*firma-medica[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi, '');
+    out = out.replace(/<p[^>]*>\s*Firma Digital del Sistema\s*<\/p>/gi, '');
+    out = out.replace(/<p[^>]*>\s*Documento generado electrónicamente\s*<\/p>/gi, '');
+    out = out.replace(/<p[^>]*>\s*Fecha:\s*[^<]*<\/p>/gi, '');
+    // Nombre del médico al final (párrafo suelto o al final de un párrafo)
+    out = out.replace(/\s*<p[^>]*>\s*(<strong>\s*)?Dr\.\s+[\w\sáéíóúñÁÉÍÓÚÑ]+(\s*<\/strong>)?\s*<\/p>\s*$/gi, '');
+    out = out.replace(/([."])\s*Dr\.\s+[\w\sáéíóúñÁÉÍÓÚÑ]+\s*<\/p>/gi, '$1</p>');
+    return out.trim();
+  }
+
   async crearInforme(informe: Omit<InformeMedico, 'id' | 'fecha_creacion' | 'fecha_actualizacion' | 'numero_informe' | 'numero_secuencial'>): Promise<InformeMedico> {
     const maxIntentos = 3;
     const client = await postgresPool.connect();
@@ -97,24 +118,26 @@ export class InformeMedicoService {
 
           console.log(`✅ Configuración actualizada: contador_actual = ${numeroSecuencial}`);
 
-          // Crear el informe
+          // Crear el informe (contenido sin firma ni nombre del médico; el PDF los añade en su bloque de firma)
+          const contenidoLimpio = this.limpiarContenidoParaGuardar(informe.contenido);
           const insertResult = await client.query(
             `INSERT INTO informes_medicos (
               numero_informe, titulo, tipo_informe, contenido, paciente_id, medico_id, 
-              template_id, estado, fecha_emision, clinica_alias, observaciones, creado_por
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              template_id, estado, fecha_emision, clinica_alias, clinica_atencion_id, observaciones, creado_por
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *`,
             [
               numeroInforme,
               informe.titulo,
               informe.tipo_informe,
-              informe.contenido,
+              contenidoLimpio,
               informe.paciente_id,
               informe.medico_id,
               informe.template_id || null,
               informe.estado,
               informe.fecha_emision,
               informe.clinica_alias,
+              informe.clinica_atencion_id ?? null,
               informe.observaciones || null,
               informe.creado_por || informe.medico_id
             ]
@@ -322,7 +345,10 @@ export class InformeMedicoService {
       Object.keys(informe).forEach(key => {
         if (key !== 'id' && key !== 'fecha_creacion' && informe[key as keyof InformeMedico] !== undefined) {
           updateFields.push(`${key} = $${paramIndex}`);
-          values.push(informe[key as keyof InformeMedico]);
+          const value = key === 'contenido'
+            ? this.limpiarContenidoParaGuardar(informe.contenido)
+            : informe[key as keyof InformeMedico];
+          values.push(value);
           paramIndex++;
         }
       });

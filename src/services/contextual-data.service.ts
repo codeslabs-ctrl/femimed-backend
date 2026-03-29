@@ -6,6 +6,7 @@ export interface DatosPaciente {
   apellidos: string;
   edad: number;
   cedula: string;
+  sexo?: string | null;
   telefono: string;
   email: string;
   direccion: string;
@@ -24,7 +25,12 @@ export interface DatosMedico {
 
 export interface UltimoInforme {
   id: number;
+  titulo?: string;
   motivo_consulta: string;
+  /** Desde historico_pacientes.examenes_paraclinicos */
+  examenes_paraclinicos: string;
+  /** Desde historico_pacientes.examenes_medico (examen físico en historia) */
+  examenes_medico: string;
   diagnostico: string;
   tratamiento: string;
   conclusiones: string;
@@ -51,7 +57,8 @@ export class ContextualDataService {
   async obtenerDatosContextuales(
     pacienteId: number, 
     medicoId: number, 
-    clinicaAlias: string
+    clinicaAlias: string,
+    options?: { maxControles?: number }
   ): Promise<DatosContextuales> {
     try {
       console.log(`🔍 Iniciando obtención de datos contextuales - Paciente: ${pacienteId}, Médico: ${medicoId}, Clínica: ${clinicaAlias}`);
@@ -85,10 +92,11 @@ export class ContextualDataService {
         ultimoInforme = undefined;
       }
       
-      // Obtener historial de consultas (últimas 5)
+      // Obtener historial de consultas (por defecto últimas 5; para informe puede pedirse más)
+      const limitControles = options?.maxControles ?? 5;
       let historialConsultas: UltimoInforme[] = [];
       try {
-        historialConsultas = await this.obtenerHistorialConsultas(pacienteId, medicoId, clinicaAlias);
+        historialConsultas = await this.obtenerHistorialConsultas(pacienteId, medicoId, clinicaAlias, limitControles);
         console.log(`📚 Historial obtenido:`, historialConsultas);
       } catch (error: any) {
         console.error(`⚠️ Error obteniendo historial (continuando):`, error);
@@ -140,6 +148,7 @@ export class ContextualDataService {
         apellidos: data.apellidos || '',
         edad: data.edad || 0,
         cedula: data.cedula || '',
+        sexo: data.sexo || null,
         telefono: data.telefono || '',
         email: data.email || '',
         direccion: data.direccion || '',
@@ -269,6 +278,8 @@ export class ContextualDataService {
       return {
         id: data.id,
         motivo_consulta: data.motivo_consulta || '',
+        examenes_paraclinicos: data.examenes_paraclinicos || '',
+        examenes_medico: data.examenes_medico || '',
         diagnostico: data.diagnostico || '',
         tratamiento: data.plan || '',
         conclusiones: data.conclusiones || '',
@@ -284,14 +295,16 @@ export class ContextualDataService {
   }
 
   /**
-   * Obtiene historial de consultas (últimas 5)
+   * Obtiene historial de consultas (controles) del paciente con el médico
+   * @param limit Número máximo de controles a devolver (por defecto 5)
    */
   private async obtenerHistorialConsultas(
     pacienteId: number, 
     medicoId: number, 
-    clinicaAlias: string
+    clinicaAlias: string,
+    limit: number = 5
   ): Promise<UltimoInforme[]> {
-    console.log(`🔍 Buscando historial de consultas para paciente ${pacienteId}, médico ${medicoId}, clínica ${clinicaAlias}`);
+    console.log(`🔍 Buscando historial de consultas para paciente ${pacienteId}, médico ${medicoId}, clínica ${clinicaAlias}, limit ${limit}`);
     
     const client = await postgresPool.connect();
     try {
@@ -304,22 +317,27 @@ export class ContextualDataService {
       
       console.log(`📊 Datos sin filtro de clínica:`, allResult.rows.length);
       
-      // Luego con el filtro de clínica (manejar caso cuando clinica_alias es null)
+      // Solo controles cuya consulta esté completada o finalizada (no agendada ni en progreso)
       const result = await client.query(
-        `SELECT * FROM historico_pacientes
-         WHERE paciente_id = $1
-           AND medico_id = $2
-           AND (clinica_alias = $3 OR clinica_alias IS NULL)
-         ORDER BY fecha_consulta DESC
-         LIMIT 5`,
-        [pacienteId, medicoId, clinicaAlias]
+        `SELECT h.* FROM historico_pacientes h
+         INNER JOIN consultas_pacientes c ON c.id = h.consulta_id
+         WHERE h.paciente_id = $1
+           AND h.medico_id = $2
+           AND (h.clinica_alias = $3 OR h.clinica_alias IS NULL)
+           AND c.estado_consulta IN ('completada', 'finalizada')
+         ORDER BY h.fecha_consulta DESC
+         LIMIT $4`,
+        [pacienteId, medicoId, clinicaAlias, limit]
       );
 
       console.log(`📊 Resultado del historial con filtro de clínica (incluyendo null):`, result.rows.length);
 
       const historial = result.rows.map((historial: any) => ({
         id: historial.id,
+        titulo: historial.titulo ?? undefined,
         motivo_consulta: historial.motivo_consulta || '',
+        examenes_paraclinicos: historial.examenes_paraclinicos || '',
+        examenes_medico: historial.examenes_medico || '',
         diagnostico: historial.diagnostico || '',
         tratamiento: historial.plan || '',
         conclusiones: historial.conclusiones || '',

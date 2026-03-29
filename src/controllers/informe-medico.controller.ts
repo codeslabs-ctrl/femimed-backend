@@ -3,6 +3,8 @@ import informeMedicoService from '../services/informe-medico.service';
 import { PDFService } from '../services/pdf.service';
 import { EmailService } from '../services/email.service.js';
 import { postgresPool } from '../config/database.js';
+import { config } from '../config/environment.js';
+import { toFechaEmisionVenezuela } from '../utils/fecha-venezuela.js';
 
 export class InformeMedicoController {
   // =====================================================
@@ -20,9 +22,18 @@ export class InformeMedicoController {
         template_id,
         estado,
         fecha_emision,
+        clinica_atencion_id,
         observaciones,
         creado_por
       } = req.body;
+
+      const contenidoStr = typeof contenido === 'string' ? contenido : (contenido != null ? String(contenido) : '');
+      console.log('[crearInforme] contenido recibido:', {
+        length: contenidoStr.length,
+        type: typeof contenido,
+        inicio: contenidoStr.substring(0, 300),
+        fin: contenidoStr.length > 400 ? contenidoStr.substring(contenidoStr.length - 150) : '(corto)'
+      });
 
       const clinicaAlias = req.clinicaAlias;
 
@@ -31,9 +42,14 @@ export class InformeMedicoController {
         return;
       }
 
-      // Obtener creado_por del body o del usuario autenticado (medico_id como fallback)
-      const usuarioCreador = creado_por || medico_id || (req as any).user?.userId || medico_id;
+      // creado_por: body, o userId del JWT, o medico_id (FK en BD es usuarios.id; si no hay userId usamos medico_id)
+      const usuarioCreador = creado_por ?? (req as any).user?.userId ?? medico_id;
+      if (usuarioCreador == null || usuarioCreador === undefined || (typeof usuarioCreador === 'number' && Number.isNaN(usuarioCreador))) {
+        res.status(400).json({ success: false, error: { message: 'Falta el campo "creado_por" o no se pudo determinar el usuario creador (medico_id o userId).' } });
+        return;
+      }
 
+      const capId = clinica_atencion_id != null ? parseInt(String(clinica_atencion_id), 10) : null;
       const informe = await informeMedicoService.crearInforme({
         titulo,
         tipo_informe,
@@ -42,8 +58,9 @@ export class InformeMedicoController {
         medico_id,
         template_id,
         estado: estado || 'borrador',
-        fecha_emision: fecha_emision ? new Date(fecha_emision) : new Date(),
+        fecha_emision: toFechaEmisionVenezuela(fecha_emision),
         clinica_alias: clinicaAlias,
+        clinica_atencion_id: (capId != null && !Number.isNaN(capId)) ? capId : null,
         observaciones,
         creado_por: usuarioCreador
       });
@@ -162,13 +179,31 @@ export class InformeMedicoController {
       const { id } = req.params;
       const informeId = parseInt(id!);
       const actualizaciones = req.body;
+      console.log('[actualizarInforme] Llamada PUT informeId=', id, 'keys body:', Object.keys(actualizaciones || {}));
+
+      const c = actualizaciones?.contenido;
+      if (c !== undefined) {
+        const contenidoStr = typeof c === 'string' ? c : (c != null ? String(c) : '');
+        console.log('[actualizarInforme] contenido recibido:', {
+          informeId,
+          length: contenidoStr.length,
+          type: typeof c,
+          inicio: contenidoStr.substring(0, 300),
+          fin: contenidoStr.length > 400 ? contenidoStr.substring(contenidoStr.length - 150) : '(corto)'
+        });
+      } else {
+        console.log('[actualizarInforme] body no trae campo contenido');
+      }
 
       if (isNaN(informeId)) {
         res.status(400).json({ success: false, message: 'ID de informe inválido' });
         return;
       }
 
-      const informe = await informeMedicoService.actualizarInforme(informeId, actualizaciones);
+      const payload = actualizaciones.fecha_emision !== undefined
+        ? { ...actualizaciones, fecha_emision: toFechaEmisionVenezuela(actualizaciones.fecha_emision) }
+        : actualizaciones;
+      const informe = await informeMedicoService.actualizarInforme(informeId, payload);
 
       res.json({
         success: true,
@@ -577,10 +612,10 @@ export class InformeMedicoController {
       const pdfBuffer = await pdfService.generarPDFInforme(informeId);
       console.log('📧 [enviarInforme] PDF generado. Bytes:', pdfBuffer?.length);
 
-      // Preparar correo
+      // Preparar correo: fecha_emision ya se guarda en zona Venezuela, solo formatear para mostrar
       const emailService = new EmailService();
       const fechaEmision = new Date(informe.fecha_emision).toLocaleDateString('es-ES');
-      const clinicaNombre = process.env['CLINICA_ALIAS'] || 'Clínica';
+      const clinicaNombre = config.sistema.clinicaNombre || 'Clínica';
       const template = emailService.getInformePacienteTemplate();
 
       console.log('📧 [enviarInforme] Enviando email (template) a:', paciente.email);

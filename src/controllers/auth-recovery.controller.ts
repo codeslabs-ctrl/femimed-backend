@@ -77,40 +77,23 @@ export class AuthRecoveryController {
       console.log('  - Email:', usuario.email);
       console.log('  - OTP generado:', otp);
       
-      try {
-        const emailService = new EmailService();
-        const emailSent = await emailService.sendPasswordRecoveryOTP(
-          usuario.email,
-          {
-            nombre: usuario.username,
-            otp: otp,
-            expiresIn: '15 minutos'
-          }
-        );
-
-        console.log('📧 Resultado del envío de email:', emailSent);
-
-        if (!emailSent) {
-          console.error('❌ Error sending recovery email - sendPasswordRecoveryOTP retornó false');
-          res.status(500).json({
-            success: false,
-            error: { message: 'Error enviando email de recuperación' }
-          } as ApiResponse<null>);
-          return;
+      const emailService = new EmailService();
+      const emailSent = await emailService.sendPasswordRecoveryOTP(
+        usuario.email,
+        {
+          nombre: usuario.username,
+          otp: otp,
+          expiresIn: '15 minutos'
         }
-      } catch (emailError: any) {
-        console.error('❌ ERROR AL ENVIAR EMAIL DE RECUPERACIÓN:');
-        console.error('  - Tipo:', typeof emailError);
-        console.error('  - Mensaje:', emailError?.message);
-        console.error('  - Código:', emailError?.code);
-        console.error('  - Response Code:', emailError?.responseCode);
-        console.error('  - Response:', emailError?.response);
-        console.error('  - Stack:', emailError?.stack);
-        console.error('  - Error completo:', JSON.stringify(emailError, Object.getOwnPropertyNames(emailError), 2));
-        
+      );
+
+      console.log('📧 Resultado del envío de email:', emailSent);
+
+      if (!emailSent) {
+        console.error('❌ Error sending recovery email');
         res.status(500).json({
           success: false,
-          error: { message: 'Error enviando email de recuperación: ' + (emailError?.message || 'Error desconocido') }
+          error: { message: 'Error enviando email de recuperación' }
         } as ApiResponse<null>);
         return;
       }
@@ -122,19 +105,12 @@ export class AuthRecoveryController {
         data: { message: 'Código de recuperación enviado a su email' }
       } as ApiResponse<{ message: string }>);
 
-    } catch (error: any) {
-      console.error('❌ Error in requestPasswordRecovery:');
-      console.error('  - Mensaje:', error?.message);
-      console.error('  - Stack:', error?.stack);
-      console.error('  - Error completo:', error);
-      
-      // Si la respuesta ya fue enviada, no intentar enviar otra
-      if (!res.headersSent) {
-        res.status(500).json({
-          success: false,
-          error: { message: 'Error interno del servidor' }
-        } as ApiResponse<null>);
-      }
+    } catch (error) {
+      console.error('Error in requestPasswordRecovery:', error);
+      res.status(500).json({
+        success: false,
+        error: { message: 'Error interno del servidor' }
+      } as ApiResponse<null>);
     }
   }
 

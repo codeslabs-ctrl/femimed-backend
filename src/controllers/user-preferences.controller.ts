@@ -45,7 +45,6 @@ export class UserPreferencesController {
       });
     } catch (error) {
       const msg = (error as Error).message;
-      // Errores de validación -> 400
       const status = msg.includes('debe') || msg.includes('requerida') || msg.includes('larga') ? 400 : 500;
       res.status(status).json({ success: false, error: { message: msg } });
     }

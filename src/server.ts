@@ -18,7 +18,12 @@ import healthRoutes from './routes/health.js';
 
 const app = express();
 
-// Helper functions para CORS (definidas primero para usar en el endpoint)
+// Body parsing middleware (debe ir antes de los middlewares de seguridad para algunos casos)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Middleware para agregar headers CORS a archivos estáticos
+// Usa las mismas variables de entorno que el middleware de seguridad principal
 const normalizeOrigin = (value: string): string =>
   value.trim().toLowerCase().replace(/\/$/, '');
 
@@ -35,16 +40,43 @@ const envOrigins = envOriginsRaw
 const allowedStaticOrigins = Array.from(new Set([
   ...envOrigins,
   // FallBacks / compat
-  'https://femimed.codes-labs.com',
-  'https://www.femimed.codes-labs.com',
+  'https://demomed.codes-labs.com',
+  'https://www.demomed.codes-labs.com',
   'http://localhost:4200',
   'http://localhost:3000'  // Desarrollo frontend alternativo
 ].map(normalizeOrigin)));
 
-// ============================================
-// ENDPOINT PERSONALIZADO PARA FIRMAS (PRIMERO)
-// ============================================
-// Este endpoint DEBE estar ANTES de cualquier otro middleware
+const staticCorsMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  const origin = req.headers.origin;
+  
+  if (origin) {
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedStaticOrigins.includes(normalizedOrigin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+    } else {
+      console.warn(`⚠️ CORS bloqueado para origen en archivos estáticos: ${origin}`);
+      res.header('Access-Control-Allow-Origin', '*');
+    }
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  // Establecer CORP explícitamente para permitir acceso cross-origin
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  
+  // Manejar preflight requests
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  
+  next();
+};
+
+// Endpoint personalizado para servir firmas con headers CORP correctos
 app.get('/assets/firmas/:filename', (req: express.Request, res: express.Response) => {
   const filename = req.params['filename'];
   if (!filename) {
@@ -127,58 +159,8 @@ app.get('/assets/firmas/:filename', (req: express.Request, res: express.Response
   });
 });
 
-// Body parsing middleware (después del endpoint de firmas)
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Middleware CORS antes de servir archivos
-const staticCorsMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
-  const origin = req.headers.origin;
-  
-  if (origin) {
-    const normalizedOrigin = normalizeOrigin(origin);
-    if (allowedStaticOrigins.includes(normalizedOrigin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-    } else {
-      console.warn(`⚠️ CORS bloqueado para origen en archivos estáticos: ${origin}`);
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    }
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  
-  // Manejar preflight requests
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-    return;
-  }
-  
-  next();
-};
-
-// Middleware adicional para asegurar que CORP se establezca después de express.static
-// Esto intercepta la respuesta justo antes de enviarla
-const setCorpHeader = (_req: express.Request, res: express.Response, next: express.NextFunction): void => {
-  // Interceptar writeHead para asegurar que CORP se establezca
-  const originalWriteHead = res.writeHead.bind(res);
-  res.writeHead = function(statusCode: number, statusMessage?: any, headers?: any): express.Response {
-    if (headers && typeof headers === 'object') {
-      headers['Cross-Origin-Resource-Policy'] = 'cross-origin';
-    } else if (!headers) {
-      headers = { 'Cross-Origin-Resource-Policy': 'cross-origin' };
-    }
-    return originalWriteHead(statusCode, statusMessage, headers);
-  };
-  next();
-};
-
 // Serve static files from uploads directory (ANTES de Helmet para evitar conflictos)
-app.use('/uploads', staticCorsMiddleware, setCorpHeader, express.static('uploads'));
+app.use('/uploads', staticCorsMiddleware, express.static('uploads'));
 
 // Serve static files from assets directory EXCEPTO /assets/firmas (ya manejado arriba)
 app.use('/assets', (req: express.Request, _res: express.Response, next: express.NextFunction) => {
@@ -187,7 +169,7 @@ app.use('/assets', (req: express.Request, _res: express.Response, next: express.
     return next('route'); // Skip this middleware
   }
   next();
-}, staticCorsMiddleware, setCorpHeader, express.static('assets'));
+}, staticCorsMiddleware, express.static('assets'));
 
 // Aplicar middlewares de seguridad (DESPUÉS de archivos estáticos)
 app.use(securityHeaders);
@@ -221,20 +203,22 @@ const startServer = async (): Promise<void> => {
     // Test database connection
     await testConnection();
     
-    app.listen(config.port, () => {
-      console.log(`ðŸš€ Server running on port ${config.port}`);
-      console.log(`ðŸ“Š Environment: ${config.nodeEnv}`);
+    app.listen(config.port, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${config.port}`);
+      console.log(`📊 Environment: ${config.nodeEnv}`);
+      console.log(`🌐 Listening on: 0.0.0.0:${config.port}`);
       
-      // Mostrar URL apropiada segÃºn el entorno
+      // Local: localhost. Producción: subdominio (ej. cm28839med.codes-labs.com) sin puerto visible (proxy).
       if (config.nodeEnv === 'production') {
-        const productionUrl = process.env['API_URL'] || `https://api.FemiMed.codes-labs.com:${config.port}`;
-        console.log(`ðŸ”— API Base URL: ${productionUrl}/api/${config.api.version}`);
+        const productionUrl = process.env['API_URL'] || 'https://cm28839med.codes-labs.com';
+        console.log(`🔗 API Base URL: ${productionUrl}/api/${config.api.version}`);
       } else {
-        console.log(`ðŸ”— API Base URL: http://localhost:${config.port}/api/${config.api.version}`);
+        console.log(`🔗 API Base URL: http://localhost:${config.port}/api/${config.api.version}`);
+        console.log(`🔗 Login endpoint: http://localhost:${config.port}/api/${config.api.version}/auth/login`);
       }
     });
   } catch (error) {
-    console.error('âŒ Failed to start server:', (error as Error).message);
+    console.error('❌ Failed to start server:', (error as Error).message);
     process.exit(1);
   }
 };

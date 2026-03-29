@@ -137,15 +137,18 @@ export class MensajeController {
       }
 
       console.log('Canales finales a guardar:', canalesValidos);
+      console.log('Cantidad de canales:', canalesValidos.length);
 
-      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'FemiMed';
+      const clinicaAlias = process.env['CLINICA_ALIAS'] || 'demomed';
       const client = await postgresPool.connect();
       try {
         await client.query('BEGIN');
 
-        // Guardar canal como array JSON o string según la estructura de la BD
-        // Si la BD soporta arrays, usar array, sino convertir a JSON string
-        const canalParaBD = canalesValidos.length === 1 ? canalesValidos[0] : JSON.stringify(canalesValidos);
+        // Guardar canal: siempre como JSON string para mantener consistencia
+        // Esto permite que tanto arrays como strings se guarden de forma uniforme
+        const canalParaBD = JSON.stringify(canalesValidos);
+        console.log('Canal a guardar en BD:', canalParaBD);
+        console.log('Tipo de canalParaBD:', typeof canalParaBD);
 
         // Crear el mensaje
         const mensajeResult = await client.query(
@@ -168,6 +171,8 @@ export class MensajeController {
         );
 
         const mensaje = mensajeResult.rows[0];
+        console.log('Mensaje creado en BD:', mensaje);
+        console.log('Canal guardado en BD:', mensaje.canal);
 
         // Obtener emails y teléfonos de los pacientes seleccionados
         const pacientesResult = await client.query(
@@ -456,7 +461,7 @@ export class MensajeController {
     }
   }
 
-  // Obtener pacientes para difusiÃ³n
+  // Obtener pacientes para difusión
   static async getPacientesParaDifusion(req: Request, res: Response): Promise<void> {
     try {
       const { busqueda, activos } = req.query;
@@ -512,7 +517,7 @@ export class MensajeController {
         sexo: paciente.sexo ?? '',
         activo: paciente.activo,
         cedula: paciente.cedula,
-          medico_nombre: 'Sin mÃ©dico asignado',
+          medico_nombre: 'Sin médico asignado',
           especialidad_nombre: 'Sin especialidad',
           seleccionado: false
         })) || [];
@@ -602,7 +607,7 @@ export class MensajeController {
           const email = destinatario.email || destinatario.paciente_email;
           
           if (!email) {
-            console.warn(`âš ï¸ Destinatario ${destinatario.paciente_id} no tiene email`);
+            console.warn(`⚠️ Destinatario ${destinatario.paciente_id} no tiene email`);
             // Actualizar como fallido
             await client.query(
               `UPDATE mensajes_destinatarios
@@ -614,7 +619,7 @@ export class MensajeController {
             continue;
           }
 
-          // Preparar plantilla del mensaje de difusiÃ³n
+          // Preparar plantilla del mensaje de difusión
           const emailTemplate = {
             subject: mensaje.titulo,
             html: `
@@ -634,7 +639,7 @@ export class MensajeController {
               <body>
                 <div class="container">
                   <div class="header">
-                    <h1>ðŸ“§ ${config.sistema.clinicaNombre}</h1>
+                    <h1>📧 ${config.sistema.clinicaNombre}</h1>
                     <h2>${mensaje.titulo}</h2>
                   </div>
                   <div class="content">
@@ -646,13 +651,13 @@ export class MensajeController {
                   </div>
                   <div class="footer">
                     <p>${config.sistema.clinicaNombre}</p>
-                    <p>Este es un mensaje automÃ¡tico, por favor no responder a este email.</p>
+                    <p>Este es un mensaje automático, por favor no responder a este email.</p>
                   </div>
                 </div>
               </body>
               </html>
             `,
-            text: mensaje.contenido.replace(/<[^>]*>/g, '') // VersiÃ³n texto plano
+            text: mensaje.contenido.replace(/<[^>]*>/g, '') // Versión texto plano
           };
 
           // Enviar email
@@ -680,10 +685,10 @@ export class MensajeController {
 
           if (resultadoEnvio) {
             enviados++;
-            console.log(`âœ… Email enviado exitosamente a ${email}`);
+            console.log(`✅ Email enviado exitosamente a ${email}`);
           } else {
             fallidos++;
-            console.error(`âŒ Error enviando email a ${email}`);
+            console.error(`❌ Error enviando email a ${email}`);
           }
         }
 
@@ -705,7 +710,7 @@ export class MensajeController {
             fallidos,
             mensaje: enviados > 0 
               ? `Mensaje enviado a ${enviados} destinatario${enviados !== 1 ? 's' : ''}`
-              : 'Error: No se pudo enviar el mensaje a ningÃºn destinatario'
+              : 'Error: No se pudo enviar el mensaje a ningún destinatario'
           }
         });
       } finally {
@@ -809,7 +814,7 @@ export class MensajeController {
     }
   }
 
-  // Obtener destinatarios actuales con informaciÃ³n completa del paciente
+  // Obtener destinatarios actuales con información completa del paciente
   static async getDestinatariosActuales(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -1097,7 +1102,7 @@ export class MensajeController {
     }
   }
 
-  // Diagnosticar destinatarios de un mensaje especÃ­fico
+  // Diagnosticar destinatarios de un mensaje específico
   static async diagnosticarDestinatarios(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -1204,12 +1209,12 @@ export class MensajeController {
     }
   }
 
-  // Obtener estadÃ­sticas
+  // Obtener estadísticas
   static async getEstadisticas(_req: Request, res: Response): Promise<void> {
     try {
       const client = await postgresPool.connect();
       try {
-        // Obtener estadÃ­sticas bÃ¡sicas
+        // Obtener estadísticas básicas
         const result = await client.query(
           'SELECT estado, total_destinatarios, total_enviados, total_fallidos FROM mensajes_difusion'
         );
@@ -1283,7 +1288,7 @@ export class MensajeController {
             mensajeOriginal.tipo_mensaje,
             'borrador',
             mensajeOriginal.creado_por,
-            mensajeOriginal.clinica_alias || process.env['CLINICA_ALIAS'] || 'FemiMed'
+            mensajeOriginal.clinica_alias || process.env['CLINICA_ALIAS'] || 'demomed'
           ]
         );
 

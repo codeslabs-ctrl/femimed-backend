@@ -1,6 +1,7 @@
 import { PatientRepository, PatientData, PatientRepositoryType } from '../repositories/patient.repository.js';
 import { PaginationInfo } from '../types/index.js';
 import { postgresPool } from '../config/database.js';
+import { checkLimitePacientes } from './parametros-clinica.service.js';
 
 export class PatientService {
   private patientRepository: InstanceType<PatientRepositoryType>;
@@ -155,6 +156,15 @@ export class PatientService {
         }
       }
 
+      // Validate telefono uniqueness
+      if (patientData.telefono && String(patientData.telefono).replace(/\D/g, '').length >= 10) {
+        const existingByTelefono = await this.patientRepository.searchByTelefono(patientData.telefono);
+        if (existingByTelefono.length > 0) {
+          console.error('❌ PatientService - Teléfono ya existe:', patientData.telefono);
+          throw new Error('El teléfono ya está registrado en el sistema');
+        }
+      }
+
       // Separar datos del paciente de los datos médicos
       const { motivo_consulta, diagnostico, conclusiones, plan, ...patientBasicData } = patientData;
       
@@ -163,6 +173,9 @@ export class PatientService {
       if (!clinicaAlias) {
         throw new Error('CLINICA_ALIAS no está configurada en las variables de entorno');
       }
+
+      // Límites de la clínica configurada (parametros_clinicas)
+      await checkLimitePacientes();
       
       console.log('✅ PatientService - Validaciones pasadas, iniciando transacción...');
       console.log('🏥 PatientService - Clínica asignada:', clinicaAlias);
@@ -197,15 +210,15 @@ export class PatientService {
 
           await client.query(
             `INSERT INTO historico_pacientes 
-             (paciente_id, motivo_consulta, diagnostico, conclusiones, plan, medico_id, clinica_alias, fecha_consulta)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+             (paciente_id, medico_id, consulta_id, titulo, motivo_consulta, diagnostico, conclusiones, plan, clinica_alias, fecha_consulta)
+             VALUES ($1, $2, NULL, 'registro_inicial', $3, $4, $5, $6, $7, $8)`,
             [
               medicalData.paciente_id,
+              medicalData.medico_id,
               medicalData.motivo_consulta,
               medicalData.diagnostico,
               medicalData.conclusiones,
               medicalData.plan,
-              medicalData.medico_id,
               medicalData.clinica_alias,
               medicalData.fecha_consulta
             ]
@@ -223,13 +236,20 @@ export class PatientService {
           console.error('❌ Error al hacer rollback:', rollbackError);
         }
         console.error('❌ PatientService - Error en transacción PostgreSQL:', dbError);
-        throw new Error(`Transaction failed: ${dbError.message}`);
+        const msg = dbError?.message ?? String(dbError);
+        if (/consulta_id|violates not-null|not-null constraint/i.test(msg)) {
+          throw new Error('No se pudo guardar el historial del paciente. Por favor, intente de nuevo.');
+        }
+        if (/Transaction failed|violates.*constraint|relation\s+"/i.test(msg)) {
+          throw new Error('No se pudo completar el registro. Por favor, intente de nuevo o contacte al administrador.');
+        }
+        throw new Error(`Transaction failed: ${msg}`);
       } finally {
         client.release();
       }
     } catch (error) {
       console.error('❌ PatientService - Error en createPatient:', error);
-      throw new Error(`Failed to create patient: ${(error as Error).message}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -284,6 +304,15 @@ export class PatientService {
         }
       }
 
+      // Validate telefono uniqueness if provided
+      if (patientData.telefono && String(patientData.telefono).replace(/\D/g, '').length >= 10) {
+        const existingByTelefono = await this.patientRepository.searchByTelefono(patientData.telefono);
+        const others = existingByTelefono.filter(p => String(p.id) !== String(id));
+        if (others.length > 0) {
+          throw new Error('El teléfono ya está registrado en el sistema');
+        }
+      }
+
       return await this.patientRepository.update(id, patientData);
     } catch (error) {
       throw new Error(`Failed to update patient: ${(error as Error).message}`);
@@ -312,13 +341,35 @@ export class PatientService {
 
   async searchPatientsByCedula(cedula: string): Promise<PatientData[]> {
     try {
-      if (!cedula || cedula.trim().length < 2) {
-        throw new Error('Search cedula must be at least 2 characters long');
+      const trimmed = (cedula ?? '').trim().toUpperCase();
+      if (!trimmed || !/^[VEJPG][0-9]{3,8}$/.test(trimmed)) {
+        throw new Error('La cédula debe ser V, E, J, P o G seguida de entre 3 y 8 dígitos');
       }
 
-      return await this.patientRepository.searchByCedula(cedula.trim());
+      return await this.patientRepository.searchByCedula(trimmed);
     } catch (error) {
       throw new Error(`Failed to search patients by cedula: ${(error as Error).message}`);
+    }
+  }
+
+  async searchPatientsByTelefono(telefono: string): Promise<PatientData[]> {
+    try {
+      const digits = (telefono || '').replace(/\D/g, '');
+      if (digits.length < 10) return [];
+      return await this.patientRepository.searchByTelefono(telefono.trim());
+    } catch (error) {
+      throw new Error(`Failed to search patients by telefono: ${(error as Error).message}`);
+    }
+  }
+
+  async searchPatientsByPatologia(q: string, medicoId: number | null): Promise<PatientData[]> {
+    try {
+      if (!q || q.trim().length === 0) {
+        throw new Error('El término de búsqueda por patología no puede estar vacío');
+      }
+      return await this.patientRepository.searchByPatologia(q.trim(), medicoId);
+    } catch (error) {
+      throw new Error(`Failed to search patients by patologia: ${(error as Error).message}`);
     }
   }
 
@@ -404,9 +455,14 @@ export class PatientService {
         
         console.log('🔍 PostgreSQL query - medico_id:', medicoId, 'today:', today);
         
-        // Query to get unique patients from both historico_pacientes and consultas_pacientes
+        // Query to get unique patients from both historico_pacientes and consultas_pacientes.
+        // tiene_consulta: true si el paciente tiene al menos una consulta (para mostrar Historial vs Agendar una Consulta).
         const result = await client.query(`
-          SELECT DISTINCT p.*
+          SELECT DISTINCT p.*,
+            EXISTS (
+              SELECT 1 FROM consultas_pacientes c
+              WHERE c.paciente_id = p.id AND c.medico_id = $1
+            ) AS tiene_consulta
           FROM pacientes p
           WHERE p.id IN (
             SELECT DISTINCT paciente_id 
@@ -479,5 +535,68 @@ export class PatientService {
     if (age < 60) return '45-59';
     if (age < 75) return '60-74';
     return '75+';
+  }
+
+  /**
+   * Pacientes activos con al menos una consulta con el médico indicado.
+   * Última consulta = fila en consultas_pacientes con mayor fecha_pautada; desempate: hora_pautada, fecha_creacion, id.
+   */
+  async getActivePatientsWithLastConsultaByMedico(
+    medicoId: number,
+    limit: number = 200
+  ): Promise<
+    {
+      paciente_id: number;
+      nombre_completo: string;
+      edad: number | null;
+      telefono: string | null;
+      email: string | null;
+      ultima_consulta_fecha: string | null;
+      ultima_consulta_hora: string | null;
+      ultima_consulta_estado: string | null;
+    }[]
+  > {
+    if (!medicoId || medicoId <= 0) {
+      throw new Error('Valid medico ID is required');
+    }
+    const lim = Math.min(Math.max(limit, 1), 500);
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(
+        `SELECT
+          p.id AS paciente_id,
+          TRIM(CONCAT(COALESCE(p.nombres, ''), ' ', COALESCE(p.apellidos, ''))) AS nombre_completo,
+          p.edad,
+          p.telefono,
+          p.email,
+          lc.fecha_pautada::text AS ultima_consulta_fecha,
+          lc.hora_pautada::text AS ultima_consulta_hora,
+          lc.estado_consulta AS ultima_consulta_estado
+        FROM pacientes p
+        INNER JOIN LATERAL (
+          SELECT c.fecha_pautada, c.hora_pautada, c.estado_consulta
+          FROM consultas_pacientes c
+          WHERE c.medico_id = $1 AND c.paciente_id = p.id
+          ORDER BY c.fecha_pautada DESC, c.hora_pautada DESC NULLS LAST, c.fecha_creacion DESC NULLS LAST, c.id DESC
+          LIMIT 1
+        ) lc ON true
+        WHERE COALESCE(p.activo, true) = true
+        ORDER BY p.apellidos NULLS LAST, p.nombres NULLS LAST
+        LIMIT $2`,
+        [medicoId, lim]
+      );
+      return result.rows as {
+        paciente_id: number;
+        nombre_completo: string;
+        edad: number | null;
+        telefono: string | null;
+        email: string | null;
+        ultima_consulta_fecha: string | null;
+        ultima_consulta_hora: string | null;
+        ultima_consulta_estado: string | null;
+      }[];
+    } finally {
+      client.release();
+    }
   }
 }

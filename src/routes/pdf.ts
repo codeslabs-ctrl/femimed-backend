@@ -17,6 +17,8 @@ router.use(verifyClinica);
  */
 router.get('/informe/:id', pdfController.generarPDFInforme.bind(pdfController));
 
+router.post('/receta-medico', pdfController.generarPDFRecetaMedico.bind(pdfController));
+
 export default router;
 
 

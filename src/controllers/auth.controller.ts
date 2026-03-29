@@ -110,14 +110,18 @@ export class AuthController {
         let medicoData = null;
         if (usuario.medico_id) {
           const medicoQuery = await client.query(
-            'SELECT nombres, apellidos FROM medicos WHERE id = $1',
+            'SELECT nombres, apellidos, sexo FROM medicos WHERE id = $1',
             [usuario.medico_id]
           );
           
           if (medicoQuery.rows.length > 0) {
             const medico = medicoQuery.rows[0];
+            const sexoMed = (medico.sexo || '').toString().toLowerCase();
+            const tituloMed = sexoMed === 'femenino' ? 'Dra.' : 'Dr.';
+            const tituloNombre = `${tituloMed} ${medico.nombres} ${medico.apellidos}`.trim();
             medicoData = {
               nombre: `${medico.nombres} ${medico.apellidos}`,
+              tituloNombre,
               username: usuario.username,
               userEmail: email,
               otp: newOtp,

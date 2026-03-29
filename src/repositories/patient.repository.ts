@@ -10,6 +10,7 @@ export interface PatientData {
   sexo: 'Masculino' | 'Femenino' | 'Otro';
   email?: string;
   telefono?: string;
+  remitido_por?: string;
   medico_id?: number;
   motivo_consulta?: string;
   diagnostico?: string;
@@ -19,14 +20,31 @@ export interface PatientData {
   medicamentos?: string;
   alergias?: string;
   observaciones?: string;
+  antecedentes_otros?: string;
   fecha_creacion?: string;
   fecha_actualizacion?: string;
 }
+
+// Columnas permitidas para UPDATE en la tabla pacientes (evita enviar motivo_consulta, diagnostico, etc. que están en historico)
+const PACIENTES_UPDATE_COLUMNS = [
+  'nombres', 'apellidos', 'cedula', 'edad', 'sexo', 'email', 'telefono',
+  'activo', 'antecedentes_otros', 'remitido_por'
+];
 
 // Implementación con PostgreSQL
 export class PatientRepository extends PostgresRepository<PatientData> {
   constructor() {
     super('pacientes');
+  }
+
+  override async update(id: string | number, data: Partial<PatientData>): Promise<PatientData> {
+    const filtered: Record<string, unknown> = {};
+    for (const key of PACIENTES_UPDATE_COLUMNS) {
+      if (data[key as keyof PatientData] !== undefined) {
+        filtered[key] = data[key as keyof PatientData];
+      }
+    }
+    return super.update(id, filtered as Partial<PatientData>);
   }
 
   async findByEmail(email: string): Promise<PatientData | null> {
@@ -53,6 +71,17 @@ export class PatientRepository extends PostgresRepository<PatientData> {
     return result.rows;
   }
 
+  /** Busca pacientes por teléfono (solo dígitos; ignora espacios, guiones, puntos). */
+  async searchByTelefono(telefono: string): Promise<PatientData[]> {
+    const digits = (telefono || '').replace(/\D/g, '');
+    if (digits.length < 10) return [];
+    const result = await this.query(
+      `SELECT * FROM ${this.tableName} WHERE REGEXP_REPLACE(COALESCE(telefono,''), '[^0-9]', '', 'g') = $1 ORDER BY id DESC`,
+      [digits]
+    );
+    return result.rows;
+  }
+
   async getPatientsByAgeRange(minAge: number, maxAge: number): Promise<PatientData[]> {
     const result = await this.query(
       `SELECT * FROM ${this.tableName} WHERE edad >= $1 AND edad <= $2 ORDER BY id DESC`,
@@ -67,6 +96,34 @@ export class PatientRepository extends PostgresRepository<PatientData> {
       [sexo]
     );
     return result.rows;
+  }
+
+  /**
+   * Busca pacientes cuyo historial contenga el texto en:
+   * - historico_pacientes: diagnostico, motivo_consulta, plan, examenes_medico, examenes_paraclinicos
+   * - antecedente_paciente: detalle (antecedentes estandarizados + pacientes.antecedentes_otros)
+   */
+  async searchByPatologia(q: string, medicoId: number | null): Promise<PatientData[]> {
+    const searchTerm = '%' + q.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+    const result = await this.query(
+      `SELECT DISTINCT p.*
+       FROM pacientes p
+       INNER JOIN historico_pacientes h ON h.paciente_id = p.id
+       LEFT JOIN antecedente_paciente ap ON ap.paciente_id = p.id
+       WHERE (
+         (h.diagnostico IS NOT NULL AND h.diagnostico ILIKE $1)
+         OR (h.motivo_consulta IS NOT NULL AND h.motivo_consulta ILIKE $1)
+         OR (p.antecedentes_otros IS NOT NULL AND TRIM(p.antecedentes_otros) <> '' AND p.antecedentes_otros ILIKE $1)
+         OR (h.plan IS NOT NULL AND h.plan ILIKE $1)
+         OR (h.examenes_medico IS NOT NULL AND h.examenes_medico ILIKE $1)
+         OR (h.examenes_paraclinicos IS NOT NULL AND h.examenes_paraclinicos ILIKE $1)
+         OR (ap.detalle IS NOT NULL AND TRIM(ap.detalle) <> '' AND ap.detalle ILIKE $1)
+       )
+       AND ($2::int IS NULL OR h.medico_id = $2)
+       ORDER BY p.apellidos, p.nombres`,
+      [searchTerm, medicoId]
+    );
+    return result.rows as PatientData[];
   }
 
   // Sobrescribir findAll para manejar correctamente los filtros de edad

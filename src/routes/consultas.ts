@@ -1,7 +1,7 @@
 import express from 'express';
 import { ConsultaController } from '../controllers/consulta.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { secretariaSecurityMiddleware, medicoSecretariaMiddleware } from '../middleware/security.js';
+import { medicoSecretariaMiddleware } from '../middleware/security.js';
 import finalizarConsultaController from '../controllers/finalizar-consulta.controller.js';
 
 const router = express.Router();
@@ -24,28 +24,31 @@ router.get('/test', (_req, res) => {
   res.json({ success: true, message: 'Test endpoint funcionando' });
 });
 
+// Permiso para finalizar consultas (según perfil del usuario)
+router.get('/permiso-finalizar', authenticateToken, ConsultaController.getPermisoFinalizar);
+
 // =====================================================
-// RUTAS DE FINALIZACIÓN CON SERVICIOS (Secretaria/Admin)
+// RUTAS DE FINALIZACIÓN CON SERVICIOS (permiso puede_finalizar del perfil)
 // Estas rutas deben ir ANTES de las rutas genéricas /:id
 // =====================================================
 
 // POST /api/v1/consultas/:id/finalizar-con-servicios - Finalizar consulta con servicios
-router.post('/:id/finalizar-con-servicios', ...secretariaSecurityMiddleware, (req: any, res: any) => 
+router.post('/:id/finalizar-con-servicios', medicoSecretariaMiddleware, (req: any, res: any) =>
   finalizarConsultaController.finalizarConsulta(req, res)
 );
 
 // GET /api/v1/consultas/:id/servicios - Obtener servicios de una consulta
-router.get('/:id/servicios', ...secretariaSecurityMiddleware, (req: any, res: any) => 
+router.get('/:id/servicios', medicoSecretariaMiddleware, (req: any, res: any) =>
   finalizarConsultaController.getServiciosConsulta(req, res)
 );
 
 // GET /api/v1/consultas/:id/totales - Obtener totales de una consulta
-router.get('/:id/totales', ...secretariaSecurityMiddleware, (req: any, res: any) => 
+router.get('/:id/totales', medicoSecretariaMiddleware, (req: any, res: any) =>
   finalizarConsultaController.getTotalesConsulta(req, res)
 );
 
 // GET /api/v1/consultas/:id/detalle-finalizacion - Obtener detalle completo de finalización
-router.get('/:id/detalle-finalizacion', ...secretariaSecurityMiddleware, (req: any, res: any) => 
+router.get('/:id/detalle-finalizacion', medicoSecretariaMiddleware, (req: any, res: any) =>
   finalizarConsultaController.getDetalleFinalizacion(req, res)
 );
 
@@ -56,7 +59,8 @@ router.post('/', authenticateToken, ConsultaController.createConsulta);
 
 router.put('/:id', authenticateToken, ConsultaController.updateConsulta);
 router.put('/:id/cancelar', authenticateToken, ConsultaController.cancelarConsulta);
-router.put('/:id/finalizar', ...secretariaSecurityMiddleware, ConsultaController.finalizarConsulta);
+// Finalizar: permitir medico/secretaria/admin; el controlador verifica permiso puede_finalizar del perfil
+router.put('/:id/finalizar', medicoSecretariaMiddleware, ConsultaController.finalizarConsulta);
 router.put('/:id/reagendar', authenticateToken, ConsultaController.reagendarConsulta);
 
 router.delete('/:id', authenticateToken, ConsultaController.deleteConsulta);

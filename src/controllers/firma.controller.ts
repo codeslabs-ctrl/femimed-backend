@@ -50,7 +50,7 @@ export class FirmaController {
       console.log(`   - path: ${req.file.path}`);
       console.log(`   - size: ${req.file.size}`);
       console.log(`   - mimetype: ${req.file.mimetype}`);
-      console.log(`   - Archivo existe físicamente: ${require('fs').existsSync(req.file.path)}`);
+      console.log(`   - Archivo existe físicamente: ${fs.existsSync(req.file.path)}`);
       
       // Verificar que el médico existe (PostgreSQL)
       const client = await postgresPool.connect();
@@ -136,6 +136,113 @@ export class FirmaController {
         success: false,
         error: { message: errorMessage }
       } as ApiResponse<null>);
+    }
+  }
+
+  /**
+   * Sube el sello húmedo de un médico (misma carpeta que la firma: assets/firmas)
+   */
+  async subirSello(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        res.status(400).json({ success: false, error: { message: 'ID de médico requerido' } } as ApiResponse<null>);
+        return;
+      }
+      const medicoId = parseInt(id);
+      if (isNaN(medicoId) || medicoId <= 0) {
+        res.status(400).json({ success: false, error: { message: 'ID de médico inválido' } } as ApiResponse<null>);
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ success: false, error: { message: 'No se proporcionó archivo de sello' } } as ApiResponse<null>);
+        return;
+      }
+      const client = await postgresPool.connect();
+      let selloAnterior: string | null = null;
+      try {
+        const result = await client.query('SELECT id, sello_humedo FROM medicos WHERE id = $1 LIMIT 1', [medicoId]);
+        if (result.rows.length === 0) {
+          res.status(404).json({ success: false, error: { message: 'Médico no encontrado' } } as ApiResponse<null>);
+          return;
+        }
+        selloAnterior = result.rows[0].sello_humedo ?? null;
+      } finally {
+        client.release();
+      }
+      const rutaSello = await this.firmaService.guardarSello(medicoId, req.file);
+      if (selloAnterior && selloAnterior !== rutaSello) {
+        try {
+          const normalizedPath = selloAnterior.startsWith('/') ? selloAnterior.substring(1) : selloAnterior;
+          const fullPath = path.join(process.cwd(), normalizedPath);
+          if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        } catch (_) {}
+      }
+      const updateClient = await postgresPool.connect();
+      try {
+        await updateClient.query(
+          'UPDATE medicos SET sello_humedo = $1, fecha_actualizacion = CURRENT_TIMESTAMP WHERE id = $2',
+          [rutaSello, medicoId]
+        );
+      } finally {
+        updateClient.release();
+      }
+      res.json({
+        success: true,
+        data: { sello_humedo: rutaSello },
+        message: 'Sello húmedo subido exitosamente'
+      } as ApiResponse<any>);
+    } catch (error: any) {
+      console.error('❌ Error en subirSello:', error);
+      const msg = error?.message || '';
+      const isColumnMissing = /sello_humedo|column.*does not exist/i.test(msg);
+      res.status(500).json({
+        success: false,
+        error: {
+          message: isColumnMissing
+            ? 'La tabla medicos no tiene la columna sello_humedo. Ejecute: ALTER TABLE medicos ADD COLUMN sello_humedo VARCHAR(500) NULL;'
+            : msg || 'Error al subir sello húmedo'
+        }
+      } as ApiResponse<null>);
+    }
+  }
+
+  /**
+   * Sirve la imagen del sello húmedo de un médico
+   */
+  async servirSello(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        res.status(400).json({ success: false, error: { message: 'ID de médico requerido' } } as ApiResponse<null>);
+        return;
+      }
+      const medicoId = parseInt(id);
+      if (isNaN(medicoId) || medicoId <= 0) {
+        res.status(400).json({ success: false, error: { message: 'ID de médico inválido' } } as ApiResponse<null>);
+        return;
+      }
+      const rutaSello = await this.firmaService.obtenerSello(medicoId);
+      if (!rutaSello) {
+        res.status(404).json({ success: false, error: { message: 'Sello no encontrado' } } as ApiResponse<null>);
+        return;
+      }
+      const normalizedPath = rutaSello.startsWith('/') ? rutaSello.substring(1) : rutaSello;
+      const fullPath = path.join(process.cwd(), normalizedPath);
+      if (!fs.existsSync(fullPath)) {
+        res.status(404).json({ success: false, error: { message: 'Archivo de sello no encontrado' } } as ApiResponse<null>);
+        return;
+      }
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      const ext = path.extname(fullPath).toLowerCase();
+      const contentTypeMap: { [key: string]: string } = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'
+      };
+      res.setHeader('Content-Type', contentTypeMap[ext] || 'application/octet-stream');
+      res.sendFile(fullPath);
+    } catch (error) {
+      console.error('❌ Error en servirSello:', error);
+      res.status(500).json({ success: false, error: { message: (error as Error).message } } as ApiResponse<null>);
     }
   }
   

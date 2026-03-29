@@ -109,7 +109,6 @@ export class ExternalRequestsService {
       const row = result.rows[0];
       return {
         ...row,
-        // Para la app de pacientes, "por_agendar" se muestra sin fecha/hora
         fecha_pautada: null,
         hora_pautada: null,
         clinica_nombre: clinicaNombre
@@ -167,9 +166,7 @@ export class ExternalRequestsService {
       return result.rows.map((r: any) => ({
         ...r,
         clinica_nombre: clinicaNombre,
-        ...(r.estado_consulta === 'por_agendar'
-          ? { fecha_pautada: null, hora_pautada: null }
-          : null)
+        ...(r.estado_consulta === 'por_agendar' ? { fecha_pautada: null, hora_pautada: null } : null)
       }));
     } finally {
       client.release();
@@ -259,13 +256,7 @@ export class ExternalRequestsService {
         clinica_nombre: clinicaNombre
       }));
 
-      // Mezcla y orden por fecha_creacion desc (ya viene ordenado por fuente, pero unificamos)
-      items.sort((a: any, b: any) => {
-        const ta = new Date(a.fecha_creacion).getTime();
-        const tb = new Date(b.fecha_creacion).getTime();
-        return tb - ta;
-      });
-
+      items.sort((a: any, b: any) => new Date(b.fecha_creacion).getTime() - new Date(a.fecha_creacion).getTime());
       return items;
     } finally {
       client.release();

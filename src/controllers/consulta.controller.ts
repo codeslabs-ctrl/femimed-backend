@@ -2,8 +2,40 @@ import { Request, Response } from 'express';
 import { postgresPool } from '../config/database.js';
 import { ApiResponse } from '../types/index.js';
 import { EmailService } from '../services/email.service.js';
+import menuService from '../services/menu.service.js';
+import clinicaAtencionService from '../services/clinica-atencion.service.js';
+
+const VENEZUELA_TZ = 'America/Caracas';
+
+/** Fecha actual en Venezuela (YYYY-MM-DD) y fechas relativas para estadísticas. */
+function getFechasVenezuela(): { hoy: string; hoyMenos7: string; hoyMenos30: string } {
+  const now = new Date();
+  const hoy = now.toLocaleDateString('en-CA', { timeZone: VENEZUELA_TZ });
+  const parts = hoy.split('-').map(Number);
+  const y: number = Number(parts[0]) || 0;
+  const m: number = Math.max(0, (Number(parts[1]) || 1) - 1);
+  const d: number = Number(parts[2]) || 1;
+  const dateHoy = new Date(y, m, d);
+  dateHoy.setDate(dateHoy.getDate() - 7);
+  const hoyMenos7 = `${dateHoy.getFullYear()}-${String(dateHoy.getMonth() + 1).padStart(2, '0')}-${String(dateHoy.getDate()).padStart(2, '0')}`;
+  dateHoy.setDate(dateHoy.getDate() - 23);
+  const hoyMenos30 = `${dateHoy.getFullYear()}-${String(dateHoy.getMonth() + 1).padStart(2, '0')}-${String(dateHoy.getDate()).padStart(2, '0')}`;
+  return { hoy, hoyMenos7, hoyMenos30 };
+}
 
 export class ConsultaController {
+  /** Formatea hora tipo "14:00" o "14:00:00" a "2:00 PM". */
+  static formatHoraAMPM(horaStr: string | null | undefined): string {
+    if (!horaStr || typeof horaStr !== 'string') return horaStr || '';
+    const parts = horaStr.trim().split(':');
+    const h = parseInt(parts[0] ?? '', 10);
+    const m = parts[1] ? parseInt(parts[1], 10) : 0;
+    if (isNaN(h)) return horaStr;
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+  }
+
   // Obtener todas las consultas con filtros
   static async getConsultas(req: Request, res: Response): Promise<void> {
     try {
@@ -94,8 +126,8 @@ export class ConsultaController {
           paramIndex++;
         }
 
-        // Ordenamiento
-        sql += ' ORDER BY fecha_pautada DESC, hora_pautada DESC';
+        // Ordenamiento: primero agendadas/reagendadas, luego por fecha descendente
+        sql += ` ORDER BY (CASE WHEN estado_consulta IN ('agendada', 'reagendada') THEN 0 ELSE 1 END), fecha_pautada DESC, hora_pautada DESC`;
 
         // Paginación
         sql += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
@@ -165,6 +197,7 @@ export class ConsultaController {
             m.id as medico_id,
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
+            m.sexo as medico_sexo,
               e.id as especialidad_id,
               e.nombre_especialidad as especialidad_nombre,
               e.descripcion as especialidad_descripcion
@@ -207,6 +240,7 @@ export class ConsultaController {
             },
             paciente_nombre: `${row.paciente_nombres} ${row.paciente_apellidos}`,
             medico_nombre: `${row.medico_nombres} ${row.medico_apellidos}`,
+            medico_sexo: row.medico_sexo || null,
             especialidad_id: row.especialidad_id || null,
             especialidad_nombre: row.especialidad_nombre || 'Sin especialidad'
           };
@@ -321,24 +355,25 @@ export class ConsultaController {
     }
   }
 
-  // Obtener consultas del día
-  static async getConsultasHoy(_req: Request, res: Response): Promise<void> {
+  // Obtener consultas del día (filtradas por médico si rol es medico)
+  static async getConsultasHoy(req: Request, res: Response): Promise<void> {
     try {
-      // Obtener fecha actual en zona horaria de Venezuela (GMT-4)
+      const user = (req as any).user;
       const now = new Date();
-      // Crear fecha en zona horaria de Venezuela usando toLocaleDateString
-      const fechaHoyVenezuela = now.toLocaleDateString('en-CA', { 
-        timeZone: 'America/Caracas' 
+      const fechaHoyVenezuela = now.toLocaleDateString('en-CA', {
+        timeZone: 'America/Caracas'
       }); // Formato YYYY-MM-DD
-      
-      console.log('🔍 getConsultasHoy - Fecha filtro (Venezuela):', fechaHoyVenezuela);
 
       const client = await postgresPool.connect();
       try {
-        const result = await client.query(
-          'SELECT * FROM vista_consultas_completa WHERE fecha_pautada = $1 ORDER BY hora_pautada ASC',
-          [fechaHoyVenezuela]
-        );
+        let sql = 'SELECT * FROM vista_consultas_completa WHERE fecha_pautada = $1';
+        const params: any[] = [fechaHoyVenezuela];
+        if (user?.rol === 'medico' && user?.medico_id != null) {
+          sql += ' AND medico_id = $2';
+          params.push(user.medico_id);
+        }
+        sql += ' ORDER BY hora_pautada ASC';
+        const result = await client.query(sql, params);
 
         res.json({
           success: true,
@@ -486,7 +521,7 @@ export class ConsultaController {
     }
   }
 
-  // Obtener consultas pendientes (consultas pasadas sin historia médica registrada)
+  // Consultas pendientes: fecha pautada anterior a hoy y aún no completadas ni finalizadas (ni canceladas / no asistió).
   static async getConsultasPendientes(req: Request, res: Response): Promise<void> {
     try {
       // Obtener información del usuario autenticado
@@ -515,7 +550,6 @@ export class ConsultaController {
 
       const client = await postgresPool.connect();
       try {
-        // Construir la query SQL
         let sqlQuery = `
           SELECT c.*, 
                  p.nombres as paciente_nombre, 
@@ -531,14 +565,8 @@ export class ConsultaController {
           INNER JOIN pacientes p ON c.paciente_id = p.id
           INNER JOIN medicos m ON c.medico_id = m.id
           LEFT JOIN especialidades e ON m.especialidad_id = e.id
-          LEFT JOIN historico_pacientes h ON (
-            h.paciente_id = c.paciente_id 
-            AND h.medico_id = c.medico_id 
-            AND h.fecha_consulta = c.fecha_pautada
-          )
-          WHERE c.fecha_pautada < $1
-            AND c.estado_consulta IN ('agendada', 'reagendada', 'en_progreso')
-            AND h.id IS NULL
+          WHERE (c.fecha_pautada::date < $1::date)
+            AND c.estado_consulta NOT IN ('completada', 'finalizada', 'cancelada', 'no_asistio')
         `;
         const params: any[] = [fechaHoyVenezuela];
 
@@ -589,7 +617,9 @@ export class ConsultaController {
           success: false,
           error: { 
             message: 'Error al obtener consultas pendientes',
-            details: process.env['NODE_ENV'] === 'development' ? dbError?.message : undefined
+            details: dbError?.message || 'Error desconocido',
+            code: dbError?.code,
+            hint: dbError?.hint
           }
         } as ApiResponse<null>);
       } finally {
@@ -598,11 +628,13 @@ export class ConsultaController {
 
     } catch (error: any) {
       console.error('Error in getConsultasPendientes:', error);
+      console.error('Error stack:', error?.stack);
       res.status(500).json({
         success: false,
         error: { 
           message: 'Error interno del servidor',
-          details: process.env['NODE_ENV'] === 'development' ? error?.message : undefined
+          details: error?.message || 'Error desconocido',
+          type: error?.name
         }
       } as ApiResponse<null>);
     }
@@ -626,19 +658,16 @@ export class ConsultaController {
         }
       }
 
-      // Validar que la fecha sea futura (manejo de zona horaria)
-      const fechaConsulta = new Date(consultaData.fecha_pautada + 'T00:00:00.000Z'); // Forzar UTC
-      const fechaActual = new Date();
-      fechaActual.setUTCHours(0, 0, 0, 0); // Usar UTC para evitar problemas de zona horaria
-      
-      console.log('🔍 Validación de fecha:', {
+      // Validar que la fecha sea futura según zona horaria de Venezuela (America/Caracas)
+      const hoyVenezuela = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' }); // YYYY-MM-DD
+      const fechaPautada = String(consultaData.fecha_pautada ?? '').slice(0, 10);
+      const esFechaPasada = fechaPautada < hoyVenezuela;
+      console.log('🔍 Validación de fecha (America/Caracas):', {
         fechaRecibida: consultaData.fecha_pautada,
-        fechaConsulta: fechaConsulta.toISOString(),
-        fechaActual: fechaActual.toISOString(),
-        esFutura: fechaConsulta >= fechaActual
+        hoyVenezuela,
+        esFutura: !esFechaPasada
       });
-      
-      if (fechaConsulta < fechaActual) {
+      if (esFechaPasada) {
         res.status(400).json({
           success: false,
           error: { message: 'La fecha de la consulta debe ser futura (posterior a hoy)' }
@@ -651,9 +680,9 @@ export class ConsultaController {
         const result = await client.query(
           `INSERT INTO consultas_pacientes 
            (paciente_id, medico_id, motivo_consulta, fecha_pautada, hora_pautada, 
-            estado_consulta, duracion_estimada, prioridad, tipo_consulta, 
-            recordatorio_enviado, clinica_alias, fecha_creacion, fecha_actualizacion)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            estado_consulta, duracion_estimada, prioridad, tipo_consulta, observaciones,
+            recordatorio_enviado, clinica_alias, clinica_atencion_id, fecha_creacion, fecha_actualizacion)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            RETURNING *`,
           [
             consultaData.paciente_id,
@@ -665,12 +694,31 @@ export class ConsultaController {
             consultaData.duracion_estimada || 30,
             consultaData.prioridad || 'normal',
             consultaData.tipo_consulta || 'primera_vez',
+            consultaData.observaciones ?? null,
             false,
-            clinicaAlias
+            clinicaAlias,
+            consultaData.clinica_atencion_id ?? null
           ]
         );
 
         const consulta = result.rows[0];
+
+        // Insertar registro en historico_pacientes: titulo = tipo_consulta, consulta_id = id de la consulta recién creada
+        const tipoConsulta = consulta.tipo_consulta || consultaData.tipo_consulta || 'primera_vez';
+        await client.query(
+          `INSERT INTO historico_pacientes 
+           (paciente_id, medico_id, consulta_id, titulo, motivo_consulta, fecha_consulta, clinica_alias)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            consultaData.paciente_id,
+            consultaData.medico_id,
+            consulta.id,
+            tipoConsulta,
+            consultaData.motivo_consulta ?? null,
+            consultaData.fecha_pautada ?? consulta.fecha_pautada,
+            clinicaAlias ?? null
+          ]
+        );
 
         // Enviar emails de confirmación
         try {
@@ -682,22 +730,48 @@ export class ConsultaController {
           const pacienteData = pacienteResult.rows[0];
 
           const medicoResult = await client.query(
-            'SELECT nombres, apellidos, email FROM medicos WHERE id = $1',
+            'SELECT nombres, apellidos, email, sexo FROM medicos WHERE id = $1',
             [consultaData.medico_id]
           );
           const medicoData = medicoResult.rows[0];
 
           if (pacienteData?.email && medicoData?.email) {
             const emailService = new EmailService();
-            
+            const sexoMedico = (medicoData.sexo || '').toString().toLowerCase();
+            const tituloMedico = sexoMedico === 'femenino' ? 'Dra.' : 'Dr.';
+            const medicoTituloNombre = `${tituloMedico} ${medicoData.nombres} ${medicoData.apellidos}`.trim();
+            const horaRaw = consulta.hora_pautada ?? consultaData.hora_pautada;
+            const horaFormateada = ConsultaController.formatHoraAMPM(horaRaw);
+
+            const observaciones = (consulta.observaciones || consultaData.observaciones || '').trim();
+            const fechaPautada = consulta.fecha_pautada ?? consultaData.fecha_pautada;
+            const duracionEstimada = consulta.duracion_estimada ?? consultaData.duracion_estimada ?? 30;
+            let nombreClinica = '';
+            let direccionClinica = '';
+            const capId = consulta.clinica_atencion_id ?? consultaData.clinica_atencion_id;
+            if (capId) {
+              const clinicaAtencion = await clinicaAtencionService.getById(capId);
+              if (clinicaAtencion) {
+                nombreClinica = clinicaAtencion.nombre_clinica || '';
+                direccionClinica = clinicaAtencion.direccion_clinica || '';
+              }
+            }
+            const bloqueDireccion = (nombreClinica || direccionClinica)
+              ? `<p><strong>Lugar de atención:</strong> ${nombreClinica || '—'}</p>${direccionClinica ? `<p><strong>Dirección:</strong> ${direccionClinica}</p>` : ''}`
+              : '';
             const consultaInfo = {
               pacienteNombre: `${pacienteData.nombres} ${pacienteData.apellidos}`,
               medicoNombre: `${medicoData.nombres} ${medicoData.apellidos}`,
-              fecha: new Date(consultaData.fecha_pautada).toLocaleDateString('es-ES'),
-              hora: consultaData.hora_pautada,
+              medicoTituloNombre,
+              fecha: new Date(fechaPautada).toLocaleDateString('es-ES'),
+              hora: horaFormateada,
               motivo: consultaData.motivo_consulta,
               tipo: consultaData.tipo_consulta,
-              duracion: consultaData.duracion_estimada
+              duracion: duracionEstimada,
+              observaciones: observaciones || '—',
+              nombreClinica: nombreClinica || '—',
+              direccionClinica,
+              bloqueDireccion
             };
 
             // Enviar emails en paralelo
@@ -879,17 +953,21 @@ export class ConsultaController {
           return;
         }
 
-        // Actualizar el estado de la consulta a 'cancelada'
+        // Si el motivo es "paciente no asistió", guardar estado no_asistio para estadísticas; si no, cancelada
+        const estadoFinal = (motivo_cancelacion || '').trim().toLowerCase() === 'paciente_no_asistio'
+          ? 'no_asistio'
+          : 'cancelada';
+
         const updateResult = await client.query(
           `UPDATE consultas_pacientes 
-           SET estado_consulta = 'cancelada',
-               motivo_cancelacion = $1,
+           SET estado_consulta = $1,
+               motivo_cancelacion = $2,
                fecha_cancelacion = CURRENT_TIMESTAMP,
-               cancelado_por = $2,
+               cancelado_por = $3,
                fecha_actualizacion = CURRENT_TIMESTAMP
-           WHERE id = $3
+           WHERE id = $4
            RETURNING *`,
-          [motivo_cancelacion, user?.userId || null, consultaId]
+          [estadoFinal, motivo_cancelacion, user?.userId || null, consultaId]
         );
 
         const consulta = updateResult.rows[0];
@@ -908,7 +986,8 @@ export class ConsultaController {
             p.email as paciente_email,
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
-            m.email as medico_email
+            m.email as medico_email,
+            m.sexo as medico_sexo
           FROM consultas_pacientes cp
           INNER JOIN pacientes p ON cp.paciente_id = p.id
           INNER JOIN medicos m ON cp.medico_id = m.id
@@ -920,13 +999,16 @@ export class ConsultaController {
 
         if (consultaCompleta && consultaCompleta.paciente_email && consultaCompleta.medico_email) {
           console.log('📧 Enviando emails de cancelación...');
-          
+          const sexoMed = (consultaCompleta.medico_sexo || '').toString().toLowerCase();
+          const tituloMed = sexoMed === 'femenino' ? 'Dra.' : 'Dr.';
+          const medicoTituloNombre = `${tituloMed} ${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`.trim();
           const emailService = new EmailService();
           const emailData = {
             pacienteNombre: `${consultaCompleta.paciente_nombres} ${consultaCompleta.paciente_apellidos}`,
             medicoNombre: `${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`,
-            fecha: consultaCompleta.fecha_pautada,
-            hora: consultaCompleta.hora_pautada,
+            medicoTituloNombre,
+            fecha: new Date(consultaCompleta.fecha_pautada).toLocaleDateString('es-ES'),
+            hora: ConsultaController.formatHoraAMPM(consultaCompleta.hora_pautada),
             motivo: consultaCompleta.motivo_consulta,
             motivoCancelacion: motivo_cancelacion,
             tipo: consultaCompleta.tipo_consulta
@@ -950,7 +1032,7 @@ export class ConsultaController {
           success: true,
           data: {
             id: consultaId,
-            estado_consulta: 'cancelada',
+            estado_consulta: consulta.estado_consulta,
             motivo_cancelacion: motivo_cancelacion,
             fecha_cancelacion: consulta.fecha_cancelacion,
             cancelado_por: user?.userId || null
@@ -970,6 +1052,26 @@ export class ConsultaController {
       res.status(500).json({
         success: false,
         error: { message: 'Error interno del servidor', details: (error as Error).message }
+      } as ApiResponse<null>);
+    }
+  }
+
+  /** GET: permiso del usuario actual para finalizar consultas (según Gestión de Perfiles) */
+  static async getPermisoFinalizar(req: Request, res: Response): Promise<void> {
+    try {
+      const user = (req as any).user;
+      const rol = user?.rol;
+      if (!rol) {
+        res.json({ success: true, data: { puedeFinalizar: false } } as ApiResponse<{ puedeFinalizar: boolean }>);
+        return;
+      }
+      const puedeFinalizar = await menuService.puedeFinalizarConsulta(rol);
+      res.json({ success: true, data: { puedeFinalizar } } as ApiResponse<{ puedeFinalizar: boolean }>);
+    } catch (error) {
+      console.error('Error getPermisoFinalizar:', error);
+      res.status(500).json({
+        success: false,
+        error: { message: 'Error al obtener permiso' }
       } as ApiResponse<null>);
     }
   }
@@ -1010,11 +1112,20 @@ export class ConsultaController {
 
         const consultaExistente = consultaCheck.rows[0];
 
-        // Verificar que solo secretaria y administrador pueden finalizar
-        if (user && user.rol !== 'secretaria' && user.rol !== 'administrador') {
+        // Verificar permiso según Gestión de Perfiles (puede_finalizar para Consultas)
+        const rol = user?.rol;
+        if (!rol) {
           res.status(403).json({
             success: false,
-            error: { message: 'Solo secretaria y administrador pueden finalizar consultas' }
+            error: { message: 'Usuario no autenticado' }
+          } as ApiResponse<null>);
+          return;
+        }
+        const puedeFinalizar = await menuService.puedeFinalizarConsulta(rol);
+        if (!puedeFinalizar) {
+          res.status(403).json({
+            success: false,
+            error: { message: 'No tiene permiso para finalizar consultas' }
           } as ApiResponse<null>);
           return;
         }
@@ -1055,7 +1166,8 @@ export class ConsultaController {
             p.email as paciente_email,
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
-            m.email as medico_email
+            m.email as medico_email,
+            m.sexo as medico_sexo
           FROM consultas_pacientes cp
           INNER JOIN pacientes p ON cp.paciente_id = p.id
           INNER JOIN medicos m ON cp.medico_id = m.id
@@ -1067,13 +1179,16 @@ export class ConsultaController {
 
         if (consultaCompleta && consultaCompleta.paciente_email && consultaCompleta.medico_email) {
           console.log('📧 Enviando emails de finalización...');
-          
+          const sexoMed = (consultaCompleta.medico_sexo || '').toString().toLowerCase();
+          const tituloMed = sexoMed === 'femenino' ? 'Dra.' : 'Dr.';
+          const medicoTituloNombre = `${tituloMed} ${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`.trim();
           const emailService = new EmailService();
           const emailData = {
             pacienteNombre: `${consultaCompleta.paciente_nombres} ${consultaCompleta.paciente_apellidos}`,
             medicoNombre: `${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`,
-            fecha: consultaCompleta.fecha_pautada,
-            hora: consultaCompleta.hora_pautada,
+            medicoTituloNombre,
+            fecha: new Date(consultaCompleta.fecha_pautada).toLocaleDateString('es-ES'),
+            hora: ConsultaController.formatHoraAMPM(consultaCompleta.hora_pautada),
             motivo: consultaCompleta.motivo_consulta,
             diagnostico: '', // Ya no se usa diagnóstico preliminar
             observaciones: '', // Ya no se usa observaciones generales
@@ -1221,12 +1336,14 @@ export class ConsultaController {
             cp.tipo_consulta,
             cp.fecha_pautada,
             cp.hora_pautada,
+            cp.observaciones,
             p.nombres as paciente_nombres,
             p.apellidos as paciente_apellidos,
             p.email as paciente_email,
             m.nombres as medico_nombres,
             m.apellidos as medico_apellidos,
-            m.email as medico_email
+            m.email as medico_email,
+            m.sexo as medico_sexo
           FROM consultas_pacientes cp
           INNER JOIN pacientes p ON cp.paciente_id = p.id
           INNER JOIN medicos m ON cp.medico_id = m.id
@@ -1238,17 +1355,22 @@ export class ConsultaController {
 
         if (consultaCompleta && consultaCompleta.paciente_email && consultaCompleta.medico_email) {
           console.log('📧 Enviando emails de reagendamiento...');
-          
+          const sexoMed = (consultaCompleta.medico_sexo || '').toString().toLowerCase();
+          const tituloMed = sexoMed === 'femenino' ? 'Dra.' : 'Dr.';
+          const medicoTituloNombre = `${tituloMed} ${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`.trim();
+          const observacionesReagendar = (consultaCompleta.observaciones || consulta?.observaciones || '').trim();
           const emailService = new EmailService();
           const emailData = {
             pacienteNombre: `${consultaCompleta.paciente_nombres} ${consultaCompleta.paciente_apellidos}`,
             medicoNombre: `${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`,
-            fechaAnterior: consultaExistente.fecha_pautada,
-            horaAnterior: consultaExistente.hora_pautada,
-            fechaNueva: consultaCompleta.fecha_pautada,
-            horaNueva: consultaCompleta.hora_pautada,
+            medicoTituloNombre,
+            fechaAnterior: new Date(consultaExistente.fecha_pautada).toLocaleDateString('es-ES'),
+            horaAnterior: ConsultaController.formatHoraAMPM(consultaExistente.hora_pautada),
+            fechaNueva: new Date(consultaCompleta.fecha_pautada).toLocaleDateString('es-ES'),
+            horaNueva: ConsultaController.formatHoraAMPM(consultaCompleta.hora_pautada),
             motivo: consultaCompleta.motivo_consulta,
-            tipo: consultaCompleta.tipo_consulta
+            tipo: consultaCompleta.tipo_consulta,
+            observaciones: observacionesReagendar || '—'
           };
 
           try {
@@ -1390,12 +1512,17 @@ export class ConsultaController {
     }
   }
 
-  // Obtener estadísticas de consultas
-  static async getEstadisticasConsultas(_req: Request, res: Response): Promise<void> {
+  // Obtener estadísticas de consultas (si rol medico, solo datos de ese médico)
+  static async getEstadisticasConsultas(req: Request, res: Response): Promise<void> {
     try {
+      const user = (req as any).user;
+      const medicoId = user?.rol === 'medico' && user?.medico_id != null ? user.medico_id : null;
+      const fechas = getFechasVenezuela();
+
       const client = await postgresPool.connect();
       try {
-        const statsResult = await client.query(`
+        const sqlQuery = medicoId != null
+          ? `
           SELECT 
             COUNT(*) as total_consultas,
             COUNT(*) FILTER (WHERE estado_consulta = 'agendada') as agendadas,
@@ -1403,25 +1530,54 @@ export class ConsultaController {
             COUNT(*) FILTER (WHERE estado_consulta = 'finalizada') as finalizadas,
             COUNT(*) FILTER (WHERE estado_consulta = 'cancelada') as canceladas,
             COUNT(*) FILTER (WHERE estado_consulta = 'por_agendar') as por_agendar,
-            COUNT(*) FILTER (WHERE fecha_pautada = CURRENT_DATE) as consultas_hoy,
+            COUNT(*) FILTER (WHERE estado_consulta = 'no_asistio') as no_asistieron,
+            COUNT(*) FILTER (WHERE (fecha_pautada::date) = $2::date) as consultas_hoy,
+            COUNT(*) FILTER (WHERE (fecha_pautada::date) >= $3::date AND (fecha_pautada::date) <= $2::date) as consultas_esta_semana,
+            COUNT(*) FILTER (WHERE fecha_pautada >= $2::date AND estado_consulta IN ('agendada', 'reagendada')) as consultas_futuras
+          FROM consultas_pacientes
+          WHERE medico_id = $1
+          `
+          : `
+          SELECT 
+            COUNT(*) as total_consultas,
+            COUNT(*) FILTER (WHERE estado_consulta = 'agendada') as agendadas,
+            COUNT(*) FILTER (WHERE estado_consulta = 'reagendada') as reagendadas,
+            COUNT(*) FILTER (WHERE estado_consulta = 'finalizada') as finalizadas,
+            COUNT(*) FILTER (WHERE estado_consulta = 'cancelada') as canceladas,
+            COUNT(*) FILTER (WHERE estado_consulta = 'por_agendar') as por_agendar,
+            COUNT(*) FILTER (WHERE (fecha_pautada::date) = CURRENT_DATE) as consultas_hoy,
             COUNT(*) FILTER (WHERE fecha_pautada >= CURRENT_DATE AND estado_consulta IN ('agendada', 'reagendada')) as consultas_futuras
           FROM consultas_pacientes
-        `);
-
+        `;
+        const params = medicoId != null ? [medicoId, fechas.hoy, fechas.hoyMenos7] : [];
+        const statsResult = await client.query(sqlQuery, params);
         const stats = statsResult.rows[0];
+
+        const data: Record<string, number> = {
+          total_consultas: parseInt(stats.total_consultas),
+          agendadas: parseInt(stats.agendadas),
+          reagendadas: parseInt(stats.reagendadas),
+          finalizadas: parseInt(stats.finalizadas),
+          canceladas: parseInt(stats.canceladas),
+          por_agendar: parseInt(stats.por_agendar),
+          consultas_hoy: parseInt(stats.consultas_hoy),
+          consultas_futuras: parseInt(stats.consultas_futuras)
+        };
+
+        if (medicoId != null) {
+          data['consultas_esta_semana'] = parseInt(stats.consultas_esta_semana ?? 0);
+          data['no_asistieron'] = parseInt(stats.no_asistieron ?? 0);
+          const pacResult = await client.query(
+            `SELECT COUNT(DISTINCT paciente_id) as pacientes_atendidos FROM consultas_pacientes 
+             WHERE medico_id = $1 AND estado_consulta = 'finalizada' AND (fecha_pautada::date) >= $2::date`,
+            [medicoId, fechas.hoyMenos30]
+          );
+          data['pacientes_atendidos_30d'] = parseInt(pacResult.rows[0]?.pacientes_atendidos ?? 0);
+        }
 
         res.json({
           success: true,
-          data: {
-            total_consultas: parseInt(stats.total_consultas),
-            agendadas: parseInt(stats.agendadas),
-            reagendadas: parseInt(stats.reagendadas),
-            finalizadas: parseInt(stats.finalizadas),
-            canceladas: parseInt(stats.canceladas),
-            por_agendar: parseInt(stats.por_agendar),
-            consultas_hoy: parseInt(stats.consultas_hoy),
-            consultas_futuras: parseInt(stats.consultas_futuras)
-          }
+          data
         } as ApiResponse<any>);
       } catch (dbError) {
         console.error('❌ PostgreSQL error fetching consultas statistics:', dbError);
@@ -1441,12 +1597,14 @@ export class ConsultaController {
     }
   }
 
-  // Obtener estadísticas de consultas por estado en un período
+  // Obtener estadísticas de consultas por estado en un período (si rol medico, solo ese médico)
   static async getEstadisticasPorPeriodo(req: Request, res: Response): Promise<void> {
     try {
       const { fecha_inicio, fecha_fin } = req.query;
+      const user = (req as any).user;
+      const medicoId = user?.rol === 'medico' && user?.medico_id != null ? user.medico_id : null;
 
-      console.log('🔍 Obteniendo estadísticas por período:', { fecha_inicio, fecha_fin });
+      console.log('🔍 Obteniendo estadísticas por período:', { fecha_inicio, fecha_fin, medicoId });
 
       const client = await postgresPool.connect();
       try {
@@ -1460,6 +1618,12 @@ export class ConsultaController {
 
         const params: any[] = [];
         let paramIndex = 1;
+
+        if (medicoId != null) {
+          sqlQuery += ` AND medico_id = $${paramIndex}`;
+          params.push(medicoId);
+          paramIndex++;
+        }
 
         if (fecha_inicio) {
           sqlQuery += ` AND fecha_pautada >= $${paramIndex}`;
@@ -1505,12 +1669,14 @@ export class ConsultaController {
     }
   }
 
-  // Obtener estadísticas de consultas por especialidad en un período
+  // Obtener estadísticas de consultas por especialidad en un período (si rol medico, solo ese médico)
   static async getEstadisticasPorEspecialidad(req: Request, res: Response): Promise<void> {
     try {
       const { fecha_inicio, fecha_fin } = req.query;
+      const user = (req as any).user;
+      const medicoId = user?.rol === 'medico' && user?.medico_id != null ? user.medico_id : null;
 
-      console.log('🔍 Obteniendo estadísticas por especialidad:', { fecha_inicio, fecha_fin });
+      console.log('🔍 Obteniendo estadísticas por especialidad:', { fecha_inicio, fecha_fin, medicoId });
 
       const client = await postgresPool.connect();
       try {
@@ -1526,6 +1692,12 @@ export class ConsultaController {
 
         const params: any[] = [];
         let paramIndex = 1;
+
+        if (medicoId != null) {
+          sqlQuery += ` AND c.medico_id = $${paramIndex}`;
+          params.push(medicoId);
+          paramIndex++;
+        }
 
         if (fecha_inicio) {
           sqlQuery += ` AND c.fecha_pautada >= $${paramIndex}`;
@@ -1571,12 +1743,14 @@ export class ConsultaController {
     }
   }
 
-  // Obtener estadísticas de consultas por médico en un período
+  // Obtener estadísticas de consultas por médico en un período (si rol medico, solo ese médico)
   static async getEstadisticasPorMedico(req: Request, res: Response): Promise<void> {
     try {
       const { fecha_inicio, fecha_fin } = req.query;
+      const user = (req as any).user;
+      const medicoId = user?.rol === 'medico' && user?.medico_id != null ? user.medico_id : null;
 
-      console.log('🔍 Obteniendo estadísticas por médico:', { fecha_inicio, fecha_fin });
+      console.log('🔍 Obteniendo estadísticas por médico:', { fecha_inicio, fecha_fin, medicoId });
 
       const client = await postgresPool.connect();
       try {
@@ -1591,6 +1765,12 @@ export class ConsultaController {
 
         const params: any[] = [];
         let paramIndex = 1;
+
+        if (medicoId != null) {
+          sqlQuery += ` AND c.medico_id = $${paramIndex}`;
+          params.push(medicoId);
+          paramIndex++;
+        }
 
         if (fecha_inicio) {
           sqlQuery += ` AND c.fecha_pautada >= $${paramIndex}`;

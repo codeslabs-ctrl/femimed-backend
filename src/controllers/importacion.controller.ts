@@ -267,11 +267,16 @@ export class ImportacionController {
 
             console.log(`💾 Insertando historia para paciente ID: ${pacienteId}, médico ID: ${medicoIdToUse}`);
 
+            // antecedentes_otros pasó a pacientes (005_antecedentes_otros_paciente.sql); actualizar paciente si hay datos
+            if (antecedentesOtros && antecedentesOtros.trim()) {
+              const otrosFormateado = antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('');
+              await client.query('UPDATE pacientes SET antecedentes_otros = $1, fecha_actualizacion = NOW() WHERE id = $2', [otrosFormateado, pacienteId]);
+            }
             const historiaResult = await client.query(
               `INSERT INTO historico_pacientes (
                 paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
-                antecedentes_otros, examenes_medico
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                examenes_medico
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
               RETURNING id`,
               [
                 pacienteId,
@@ -281,8 +286,7 @@ export class ImportacionController {
                 conclusiones ? `<p>${conclusiones}</p>` : null,
                 plan ? `<p>${plan}</p>` : null,
                 fechaConsulta,
-                process.env['CLINICA_ALIAS'] || 'femimed',
-                antecedentesOtros ? antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null,
+                process.env['CLINICA_ALIAS'] || 'demomed',
                 examenesMedicoFormateado
               ]
             );
@@ -503,15 +507,13 @@ export class ImportacionController {
               results.pacientes_actualizados++;
             }
 
-            // Procesar cada hoja como un registro separado en historico_pacientes
-            // IMPORTANTE: Todas las hojas usan el mismo pacienteId (paciente único)
+            // Procesar cada hoja como un registro separado
             for (let i = 0; i < pages.length; i++) {
               const pageText = pages[i];
               if (!pageText) {
                 console.warn(`⚠️ Hoja ${i + 1} del archivo ${file.originalname} está vacía, saltando...`);
                 continue;
               }
-              console.log(`📋 Procesando hoja ${i + 1} de ${pages.length} del archivo ${file.originalname} para paciente ID: ${pacienteId}`);
               
               // Parsear cada hoja
               const parsedData = this.parserService.parseDocument(pageText, file.originalname);
@@ -539,11 +541,15 @@ export class ImportacionController {
               // Usar la fecha extraída de la hoja, o la fecha actual si no se encontró
               const fechaConsulta = parsedData.historia.fecha_consulta || new Date().toISOString().split('T')[0];
 
+              if (antecedentesOtros && antecedentesOtros.trim()) {
+                const otrosFormateado = antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('');
+                await client.query('UPDATE pacientes SET antecedentes_otros = $1, fecha_actualizacion = NOW() WHERE id = $2', [otrosFormateado, pacienteId]);
+              }
               await client.query(
                 `INSERT INTO historico_pacientes (
                   paciente_id, medico_id, motivo_consulta, diagnostico, conclusiones, plan, fecha_consulta, clinica_alias,
-                  antecedentes_otros, examenes_medico
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                  examenes_medico
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
                 [
                   pacienteId,
                   medicoIdToUse,
@@ -552,8 +558,7 @@ export class ImportacionController {
                   conclusiones ? `<p>${conclusiones}</p>` : null,
                   plan ? `<p>${plan}</p>` : null,
                   fechaConsulta,
-                  process.env['CLINICA_ALIAS'] || 'femimed',
-                  antecedentesOtros ? antecedentesOtros.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => `<p>${line}</p>`).join('') : null,
+                  process.env['CLINICA_ALIAS'] || 'demomed',
                   examenesMedicoFormateado
                 ]
               );

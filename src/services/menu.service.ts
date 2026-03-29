@@ -445,6 +445,30 @@ export class MenuService {
       client.release();
     }
   }
+
+  /**
+   * Indica si el perfil tiene permiso para finalizar consultas (puede_finalizar en Gestión de Consultas).
+   * perfilNombre debe coincidir con perfiles.nombre (ej: 'medico', 'administrador', 'secretaria').
+   */
+  async puedeFinalizarConsulta(perfilNombre: string): Promise<boolean> {
+    if (!perfilNombre) return false;
+    const client = await postgresPool.connect();
+    try {
+      const result = await client.query(`
+        SELECT pma.puede_finalizar
+        FROM perfiles p
+        INNER JOIN perfiles_menu_acceso pma ON pma.perfil_id = p.id
+        INNER JOIN menu_items mi ON mi.id = pma.menu_item_id
+        WHERE p.nombre = $1
+          AND p.activo = true
+          AND (mi.nombre ILIKE '%Consultas%' OR mi.ruta ILIKE '%consultas%')
+        LIMIT 1
+      `, [perfilNombre]);
+      return result.rows.length > 0 && result.rows[0].puede_finalizar === true;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export default new MenuService();

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PatientService } from '../services/patient.service.js';
+import { HistoricoService } from '../services/historico.service.js';
 import { ApiResponse } from '../types/index.js';
 import { postgresPool } from '../config/database.js';
 
@@ -14,9 +15,11 @@ interface AuthenticatedRequest extends Request {
 
 export class PatientController {
   private patientService: PatientService;
+  private historicoService: HistoricoService;
 
   constructor() {
     this.patientService = new PatientService();
+    this.historicoService = new HistoricoService();
   }
 
   async getAllPatients(req: Request<{}, ApiResponse, {}, any>, res: Response<ApiResponse>): Promise<void> {
@@ -78,6 +81,51 @@ export class PatientController {
         error: { message: (error as Error).message }
       };
       res.status(500).json(response);
+    }
+  }
+
+  async getAntecedentes(req: AuthenticatedRequest, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const idParam = req.params['id'];
+      if (idParam === undefined) {
+        res.status(400).json({ success: false, error: { message: 'ID de paciente inválido.' } });
+        return;
+      }
+      const id = parseInt(idParam, 10);
+      if (isNaN(id)) {
+        res.status(400).json({ success: false, error: { message: 'ID de paciente inválido.' } });
+        return;
+      }
+      const data = await this.historicoService.getAntecedentesByPacienteId(id);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('getAntecedentes error:', error);
+      res.status(500).json({ success: false, error: { message: (error as Error).message } });
+    }
+  }
+
+  async saveAntecedentes(req: AuthenticatedRequest, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const idParam = req.params['id'];
+      if (idParam === undefined) {
+        res.status(400).json({ success: false, error: { message: 'ID de paciente inválido.' } });
+        return;
+      }
+      const id = parseInt(idParam, 10);
+      if (isNaN(id)) {
+        res.status(400).json({ success: false, error: { message: 'ID de paciente inválido.' } });
+        return;
+      }
+      const body = req.body as {
+        antecedentes?: { antecedente_tipo_id: number; presente: boolean; detalle?: string | null }[];
+        antecedentes_otros?: string | null;
+      };
+      const items = Array.isArray(body?.antecedentes) ? body.antecedentes : [];
+      const data = await this.historicoService.saveAntecedentesByPacienteId(id, items, body?.antecedentes_otros);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('saveAntecedentes error:', error);
+      res.status(500).json({ success: false, error: { message: (error as Error).message } });
     }
   }
 
@@ -193,11 +241,14 @@ export class PatientController {
       };
       res.json(response);
     } catch (error) {
+      const err = error as Error;
+      console.error('❌ updatePatient error:', err.message, err.stack);
       const response: ApiResponse = {
         success: false,
-        error: { message: (error as Error).message }
+        error: { message: err.message }
       };
-      res.status(400).json(response);
+      const status = err.message.includes('Record not found') ? 404 : 500;
+      res.status(status).json(response);
     }
   }
 
@@ -411,6 +462,70 @@ export class PatientController {
     }
   }
 
+  async searchPatientsByTelefono(req: Request<{}, ApiResponse, {}, { telefono?: string }>, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const { telefono } = req.query;
+
+      if (!telefono || String(telefono).trim().length < 10) {
+        const response: ApiResponse = {
+          success: true,
+          data: []
+        };
+        res.json(response);
+        return;
+      }
+
+      const patients = await this.patientService.searchPatientsByTelefono(telefono as string);
+
+      const response: ApiResponse = {
+        success: true,
+        data: patients
+      };
+      res.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: { message: (error as Error).message }
+      };
+      res.status(400).json(response);
+    }
+  }
+
+  async searchPatientsByPatologia(req: Request<{}, ApiResponse, {}, { q?: string; medico_id?: string }>, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const q = (req.query.q || '').trim();
+      const medicoIdParam = req.query.medico_id;
+      const medicoId = medicoIdParam ? parseInt(medicoIdParam, 10) : null;
+
+      if (!q) {
+        const response: ApiResponse = {
+          success: false,
+          error: { message: 'El parámetro "q" es requerido para la búsqueda por patología.' }
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      const patients = await this.patientService.searchPatientsByPatologia(q, isNaN(medicoId as number) ? null : medicoId);
+      if (process.env['NODE_ENV'] !== 'production') {
+        console.log('[searchPatientsByPatologia] q=', q, 'medicoId=', medicoId, 'results=', patients?.length ?? 0);
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: patients
+      };
+      res.json(response);
+    } catch (error) {
+      console.error('[searchPatientsByPatologia] error:', (error as Error).message);
+      const response: ApiResponse = {
+        success: false,
+        error: { message: (error as Error).message }
+      };
+      res.status(500).json(response);
+    }
+  }
+
   async getPatientsByAgeRange(req: Request<{}, ApiResponse, {}, { minAge?: string; maxAge?: string }>, res: Response<ApiResponse>): Promise<void> {
     try {
       const { minAge, maxAge } = req.query;
@@ -516,6 +631,55 @@ export class PatientController {
         error: { message: (error as Error).message }
       };
       res.status(400).json(response);
+    }
+  }
+
+  /**
+   * Pacientes activos del médico en sesión con última consulta (fecha_pautada + estado de esa fila).
+   * Admin/secretaria pueden pasar ?medico_id=.
+   */
+  async getMyActivePatientsLastConsulta(req: AuthenticatedRequest, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const user = req.user;
+      const limitRaw = parseInt(String(req.query['limit'] ?? '200'), 10);
+      const limit = Math.min(Math.max(isNaN(limitRaw) ? 200 : limitRaw, 1), 500);
+
+      let medicoId: number | null = null;
+      const qMedico = req.query['medico_id'] != null ? parseInt(String(req.query['medico_id']), 10) : NaN;
+      if (!isNaN(qMedico) && qMedico > 0 && user && (user.rol === 'administrador' || user.rol === 'secretaria')) {
+        medicoId = qMedico;
+      } else if (user?.medico_id && user.medico_id > 0) {
+        medicoId = user.medico_id;
+      }
+
+      if (!medicoId) {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            message:
+              'Se requiere usuario médico con medico_id o, para administrador/secretaria, el query param medico_id.',
+          },
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      const pacientes = await this.patientService.getActivePatientsWithLastConsultaByMedico(medicoId, limit);
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          pacientes,
+          criterio_ultima_consulta:
+            'Por cada paciente se toma la consulta en consultas_pacientes con este médico que tiene la fecha_pautada más reciente; si hay empate, hora_pautada, luego fecha_creacion y id. ultima_consulta_estado es el estado_consulta de esa fila.',
+        },
+      };
+      res.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: { message: (error as Error).message },
+      };
+      res.status(500).json(response);
     }
   }
 
