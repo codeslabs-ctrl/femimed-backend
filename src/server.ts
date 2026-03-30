@@ -39,11 +39,13 @@ const envOrigins = envOriginsRaw
 
 const allowedStaticOrigins = Array.from(new Set([
   ...envOrigins,
-  // FallBacks / compat
+  // Producción codes-labs (FemiMed + DemoMed)
+  'https://femimed.codes-labs.com',
+  'https://www.femimed.codes-labs.com',
   'https://demomed.codes-labs.com',
   'https://www.demomed.codes-labs.com',
   'http://localhost:4200',
-  'http://localhost:3000'  // Desarrollo frontend alternativo
+  'http://localhost:3000'
 ].map(normalizeOrigin)));
 
 const staticCorsMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction): void => {

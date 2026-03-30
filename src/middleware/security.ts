@@ -20,24 +20,36 @@ export const securityHeaders = helmet({
   crossOriginEmbedderPolicy: false
 });
 
-// CORS configurado para DemoMed
-const allowedOrigins = [
-  process.env['FRONTEND_URL'] || 'http://localhost:4200',
+// CORS: mismos criterios que `server.ts` (archivos estáticos). Incluye FemiMed y DemoMed en codes-labs.
+const normalizeOrigin = (value: string): string =>
+  value.trim().toLowerCase().replace(/\/$/, '');
+
+const originsFromEnv = (
+  [process.env['CORS_ORIGIN'], process.env['FRONTEND_URL']].filter(Boolean) as string[]
+)
+  .flatMap((v) => v.split(','))
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const defaultProductionOrigins = [
+  'https://femimed.codes-labs.com',
+  'https://www.femimed.codes-labs.com',
   'https://demomed.codes-labs.com',
   'https://www.demomed.codes-labs.com',
-  'http://localhost:4200', // Desarrollo Angular por defecto
-  'http://localhost:3000'  // Desarrollo frontend alternativo
-].filter(Boolean); // Elimina valores undefined/null
+  'http://localhost:4200',
+  'http://localhost:3000'
+];
+
+const allowedOriginsNormalized = new Set(
+  [...originsFromEnv, ...defaultProductionOrigins].map(normalizeOrigin)
+);
 
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Permitir requests sin origen (mobile apps, Postman, etc.)
     if (!origin) {
       return callback(null, true);
     }
-    
-    // Verificar si el origen está permitido
-    if (allowedOrigins.includes(origin)) {
+    if (allowedOriginsNormalized.has(normalizeOrigin(origin))) {
       callback(null, true);
     } else {
       console.warn(`⚠️ CORS bloqueado para origen: ${origin}`);
@@ -46,7 +58,8 @@ export const corsMiddleware = cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Content-Length']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Content-Length', 'Accept'],
+  optionsSuccessStatus: 204
 });
 
 // Rate limiting eliminado - No se aplican límites de tiempo a las peticiones
