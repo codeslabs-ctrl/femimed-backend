@@ -137,7 +137,16 @@ export class PostgresRepository<T = any> implements BaseRepository<T> {
 
       return result.rows[0] as T;
     } catch (error) {
-      throw new Error(`Failed to create record: ${(error as Error).message}`);
+      const pg = error as { code?: string; constraint?: string; message?: string; detail?: string };
+      const wrapped = new Error(`Failed to create record: ${pg.message || String(error)}`) as Error & {
+        code?: string;
+        constraint?: string;
+        detail?: string;
+      };
+      if (pg.code != null) wrapped.code = pg.code;
+      if (pg.constraint != null) wrapped.constraint = pg.constraint;
+      if (pg.detail != null) wrapped.detail = pg.detail;
+      throw wrapped;
     } finally {
       client.release();
     }
@@ -165,7 +174,16 @@ export class PostgresRepository<T = any> implements BaseRepository<T> {
 
       return result.rows[0] as T;
     } catch (error) {
-      throw new Error(`Failed to update record: ${(error as Error).message}`);
+      const pg = error as { code?: string; constraint?: string; message?: string; detail?: string };
+      const wrapped = new Error(`Failed to update record: ${pg.message || String(error)}`) as Error & {
+        code?: string;
+        constraint?: string;
+        detail?: string;
+      };
+      if (pg.code != null) wrapped.code = pg.code;
+      if (pg.constraint != null) wrapped.constraint = pg.constraint;
+      if (pg.detail != null) wrapped.detail = pg.detail;
+      throw wrapped;
     } finally {
       client.release();
     }

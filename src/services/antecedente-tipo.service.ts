@@ -1,10 +1,17 @@
 import { AntecedenteTipoRepository, AntecedenteMedicoTipoData } from '../repositories/antecedente-tipo.repository.js';
+import { AntecedentesTipoLabelRepository, AntecedenteTipoLabelRow } from '../repositories/antecedentes-tipo-label.repository.js';
 
 export class AntecedenteTipoService {
   private repository: AntecedenteTipoRepository;
+  private labelRepository: AntecedentesTipoLabelRepository;
 
   constructor() {
     this.repository = new AntecedenteTipoRepository();
+    this.labelRepository = new AntecedentesTipoLabelRepository();
+  }
+
+  async getCategoriaLabels(): Promise<AntecedenteTipoLabelRow[]> {
+    return this.labelRepository.findActivosOrdenados();
   }
 
   async getAll(): Promise<AntecedenteMedicoTipoData[]> {

@@ -92,6 +92,16 @@ export class PDFController {
       const pdfPacienteId =
         pacienteId != null && !Number.isNaN(pacienteId) ? pacienteId : null;
 
+      console.log(
+        '[PDF récipe] Solicitud · medicoId=%s tipo=%s contenidoChars=%d pacienteId=%s pies=%s',
+        String(medicoIdJwt),
+        tipo,
+        contenido.length,
+        pdfPacienteId != null ? String(pdfPacienteId) : 'null',
+        JSON.stringify(piesClinicaIds)
+      );
+      const t0 = Date.now();
+
       const pdfBuffer = await this.pdfService.generarPDFRecetaMedico({
         medicoId: medicoIdJwt,
         tipo,
@@ -100,6 +110,8 @@ export class PDFController {
         fechaEmision: fechaEmision || null,
         piesClinicaIds
       });
+
+      console.log('[PDF récipe] Listo · bytes=%d · ms=%d', pdfBuffer.length, Date.now() - t0);
 
       const label =
         tipo === 'indicaciones' ? 'indicaciones' : tipo === 'ambos' ? 'ambos' : 'recipe';
@@ -110,7 +122,8 @@ export class PDFController {
       res.setHeader('Cache-Control', 'no-cache');
       res.send(pdfBuffer);
     } catch (error: any) {
-      console.error('❌ Error generando PDF récipe:', error);
+      console.error('❌ [PDF récipe] Error:', error?.message || error);
+      if (error?.stack) console.error(error.stack);
       const msg = error?.message || 'Error generando el PDF';
       const status = msg.includes('obligatorio') || msg.includes('no encontrado') ? 400 : 500;
       res.status(status).json({

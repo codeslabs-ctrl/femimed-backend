@@ -7,6 +7,7 @@ const controller = new AntecedenteTipoController();
 
 router.use(authenticateToken);
 
+router.get('/categoria-labels', (req, res) => controller.getCategoriaLabels(req, res));
 router.get('/', (req, res) => controller.getAll(req, res));
 router.get('/por-tipo', (req, res) => controller.getByTipo(req, res));
 router.get('/:id', (req, res) => controller.getById(req, res));

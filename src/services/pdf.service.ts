@@ -770,6 +770,151 @@ export class PDFService {
   }
 
   /**
+   * Modo "Ambos": divide por la primera línea que empiece por "Indicaciones:".
+   * Quita las líneas guía Récipe:/Indicaciones: del cuerpo (el título va en el encabezado de cada mitad).
+   */
+  private splitContenidoRecetaAmbos(texto: string): { recipe: string; indicaciones: string; ok: boolean } {
+    const normalized = (texto || '').replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    let idx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? '';
+      if (/^\s*indicaciones\s*:/i.test(line)) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) {
+      return { recipe: normalized.trim(), indicaciones: '', ok: false };
+    }
+    let recipe = lines.slice(0, idx).join('\n').trim();
+    let indicaciones = lines.slice(idx).join('\n').trim();
+    recipe = recipe.replace(/^\s*(r[ée]cipe|recipe)\s*:\s*/i, '').trim();
+    indicaciones = indicaciones.replace(/^\s*indicaciones\s*:\s*/i, '').trim();
+    return { recipe, indicaciones, ok: true };
+  }
+
+  private htmlRecetaCuerpoPlanoLineas(texto: string): string {
+    const t = (texto || '').trim();
+    if (!t) {
+      return '<span class="receta-vacio" style="color:#94a3b8;font-style:italic;">—</span>';
+    }
+    return t
+      .split(/\n/)
+      .map((line) => this.escapeHtmlPdf(line))
+      .join('<br/>');
+  }
+
+  private buildRecetaMedicoEncabezadoFragment(params: {
+    tituloDoc: string;
+    logoHeaderHtml: string;
+    tituloMed: string;
+    nombreCompleto: string;
+    lineasTitulacion: string[];
+    medico: any;
+  }): string {
+    const { tituloDoc, logoHeaderHtml, tituloMed, nombreCompleto, lineasTitulacion, medico } = params;
+    return `<div class="receta-header">
+    <div class="receta-header-row">
+      <div class="receta-logo-cell">${logoHeaderHtml}</div>
+      <div class="receta-header-main">
+        ${tituloDoc ? `<div class="receta-tipo">${this.escapeHtmlPdf(tituloDoc)}</div>` : ''}
+        <div class="receta-med-nombre">${this.escapeHtmlPdf(tituloMed)} ${this.escapeHtmlPdf(nombreCompleto)}</div>
+        ${lineasTitulacion.map((t: string) => `<div class="receta-titulacion">${this.escapeHtmlPdf(t)}</div>`).join('')}
+        ${!lineasTitulacion.length && medico.nombre_especialidad ? `<div class="receta-titulacion">${this.escapeHtmlPdf(medico.nombre_especialidad)}</div>` : ''}
+        <div class="receta-meta">
+          ${medico.cedula ? `RIF / Cédula: ${this.escapeHtmlPdf(medico.cedula)} · ` : ''}
+          ${medico.email ? `${this.escapeHtmlPdf(medico.email)} · ` : ''}
+          ${medico.telefono ? `${this.escapeHtmlPdf(medico.telefono)}` : ''}
+          ${medico.contacto_redes ? `<br/>${this.escapeHtmlPdf(String(medico.contacto_redes))}` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+  }
+
+  /** Encabezado compacto por mitad: logo a la izquierda, fecha de emisión a la derecha (referencia formulario impreso). */
+  private buildRecetaAmbosMitadHeader(logoHeaderHtml: string, fechaStr: string): string {
+    return `<div class="receta-header receta-header--ambos-mitad">
+    <div class="receta-header-row receta-header-row--ambos">
+      <div class="receta-logo-cell">${logoHeaderHtml}</div>
+      <div class="receta-fecha-emision">
+        <div class="receta-fecha-emision-lbl">Fecha de emisión</div>
+        <div class="receta-fecha-emision-val">${this.escapeHtmlPdf(fechaStr)}</div>
+      </div>
+    </div>
+  </div>`;
+  }
+
+  /** Pie de cada mitad: médico y credenciales (firma/sello van al final del cuerpo). */
+  private buildRecetaMedicoPieProfesionalMitad(params: {
+    tituloMed: string;
+    nombreCompleto: string;
+    lineasTitulacion: string[];
+    medico: any;
+  }): string {
+    const m = params.medico;
+    const creds: string[] = [];
+    if (m.mpps) creds.push(`MPPS: ${this.escapeHtmlPdf(String(m.mpps))}`);
+    if (m.cm) creds.push(`C.M.: ${this.escapeHtmlPdf(String(m.cm))}`);
+    const credLine = creds.length ? `<div class="receta-pie-creds">${creds.join(' · ')}</div>` : '';
+    return `<div class="receta-pie-doc">
+    <div class="receta-med-nombre">${this.escapeHtmlPdf(params.tituloMed)} ${this.escapeHtmlPdf(params.nombreCompleto)}</div>
+    ${params.lineasTitulacion.map((t: string) => `<div class="receta-titulacion">${this.escapeHtmlPdf(t)}</div>`).join('')}
+    ${!params.lineasTitulacion.length && m.nombre_especialidad ? `<div class="receta-titulacion">${this.escapeHtmlPdf(m.nombre_especialidad)}</div>` : ''}
+    ${credLine}
+    <div class="receta-meta receta-meta--pie">
+      ${m.cedula ? `RIF / Cédula: ${this.escapeHtmlPdf(m.cedula)} · ` : ''}
+      ${m.email ? `${this.escapeHtmlPdf(m.email)} · ` : ''}
+      ${m.telefono ? `${this.escapeHtmlPdf(m.telefono)}` : ''}
+      ${m.contacto_redes ? `<br/>${this.escapeHtmlPdf(String(m.contacto_redes))}` : ''}
+    </div>
+  </div>`;
+  }
+
+  private buildRecetaMedicoMitadVertical(params: {
+    tituloPanel: string;
+    innerHtml: string;
+    fechaStr: string;
+    bloquePaciente: string;
+    footerRow: string;
+    bloqueFirmaEnContenido: string;
+    tituloMed: string;
+    logoHeaderHtml: string;
+    nombreCompleto: string;
+    lineasTitulacion: string[];
+    medico: any;
+    watermarkDataUrl: string;
+  }): string {
+    const header = this.buildRecetaAmbosMitadHeader(params.logoHeaderHtml, params.fechaStr);
+    const pieDoc = this.buildRecetaMedicoPieProfesionalMitad({
+      tituloMed: params.tituloMed,
+      nombreCompleto: params.nombreCompleto,
+      lineasTitulacion: params.lineasTitulacion,
+      medico: params.medico
+    });
+    const wmUrl = params.watermarkDataUrl.replace(/'/g, '%27');
+    const wm = params.watermarkDataUrl
+      ? `<div class="receta-body-wm-logo" style="background-image:url('${wmUrl}')"></div>`
+      : `<div class="receta-watermark">${params.tituloMed.charAt(0)}</div>`;
+    const tp = params.tituloPanel;
+    const etiqueta =
+      tp === 'Rp.'
+        ? `<div class="receta-seccion-etiqueta"><strong>Rp.</strong></div>`
+        : `<div class="receta-seccion-etiqueta"><strong>${this.escapeHtmlPdf(tp)}:</strong></div>`;
+    return `<div class="receta-ambos-mitad">
+  ${header}
+  ${params.bloquePaciente}
+  <div class="receta-body receta-body--mitad${params.watermarkDataUrl ? ' receta-body--con-logo-wm' : ''}">
+    ${wm}
+    <div class="receta-body-inner"><div class="receta-body-texto">${etiqueta}${params.innerHtml}</div>${params.bloqueFirmaEnContenido}</div>
+  </div>
+  ${pieDoc}
+  ${params.footerRow}
+</div>`;
+  }
+
+  /**
    * Procesa el contenido del informe para aplicar estilos
    * Mantiene el orden original del contenido sin duplicar datos
    */
@@ -951,7 +1096,8 @@ export class PDFService {
 
   /**
    * Genera PDF de récipe médico o indicaciones (médico logueado).
-   * Tipo "ambos": el encabezado no repite "Récipe"/"Indicaciones" (tituloDoc vacío), pero el cuerpo conserva el texto del editor, incluidas esas etiquetas.
+   * Tipo "ambos" con "Indicaciones:": A4 apaisado, dos columnas (Rp. | Indicación), cada una con encabezado, cuerpo y pie.
+   * Sin "Indicaciones:": un solo bloque (etiquetas en negrita en el cuerpo).
    */
   async generarPDFRecetaMedico(params: {
     medicoId: number;
@@ -962,6 +1108,12 @@ export class PDFService {
     piesClinicaIds?: number[];
   }): Promise<Buffer> {
     const { medicoId, tipo, contenido, pacienteId, fechaEmision, piesClinicaIds } = params;
+    console.log(
+      '[PDF récipe service] Inicio · medicoId=%d tipo=%s contenidoChars=%d',
+      medicoId,
+      tipo,
+      (contenido || '').length
+    );
     let texto = (contenido || '').trim();
     if (!texto) {
       throw new Error('El contenido del récipe es obligatorio');
@@ -993,6 +1145,11 @@ export class PDFService {
     } finally {
       client.release();
     }
+    console.log(
+      '[PDF récipe service] DB ok · médico id=%d · paciente=%s',
+      medico.id,
+      paciente ? 'sí' : 'no'
+    );
 
     let firmaBase64 = '';
     let selloBase64 = '';
@@ -1052,12 +1209,17 @@ export class PDFService {
       ? `<img src="${headerLogoB64}" alt="${this.escapeHtmlPdf(nombreLogoHeader)}" class="receta-logo-img ${headerLogoClass}" />`
       : `<div class="receta-logo-fallback" style="background:${colorFb}">${this.escapeHtmlPdf(inicialLogo)}</div>`;
 
-    const htmlContenido = texto
-      .split(/\n/)
-      .map((line) =>
-        tipo === 'ambos' ? this.formatRecetaLineaAmbos(line) : this.escapeHtmlPdf(line)
-      )
-      .join('<br/>');
+    const splitAmbos = tipo === 'ambos' ? this.splitContenidoRecetaAmbos(texto) : { recipe: '', indicaciones: '', ok: false };
+    const usarDosMitadesVerticales = tipo === 'ambos' && splitAmbos.ok;
+
+    const htmlContenido = usarDosMitadesVerticales
+      ? ''
+      : texto
+          .split(/\n/)
+          .map((line) =>
+            tipo === 'ambos' ? this.formatRecetaLineaAmbos(line) : this.escapeHtmlPdf(line)
+          )
+          .join('<br/>');
 
     let bloquePaciente = '';
     if (paciente) {
@@ -1076,15 +1238,12 @@ export class PDFService {
     for (const cid of ids) {
       const cap = await clinicaAtencionService.getById(cid);
       if (!cap) continue;
-      const logoB64 = cap.logo_path ? await this.obtenerLogoBase64(cap.logo_path) : '';
-      const img = logoB64
-        ? `<img src="${logoB64}" alt="" class="pie-logo" />`
-        : '';
+      /* Femimed: pie de receta solo dirección (sin logo ni nombre de clínica). */
+      const dir = cap.direccion_clinica?.trim();
+      if (!dir) continue;
       piesHtml.push(`
         <div class="pie-col">
-          ${img}
-          <div class="pie-nombre">${this.escapeHtmlPdf(cap.nombre_clinica)}</div>
-          ${cap.direccion_clinica ? `<div class="pie-dir">${this.escapeHtmlPdf(cap.direccion_clinica)}</div>` : ''}
+          <div class="pie-dir">${this.escapeHtmlPdf(dir)}</div>
         </div>`);
     }
     const footerRow = piesHtml.length
@@ -1092,9 +1251,9 @@ export class PDFService {
       : '';
 
     const tieneFirmaSello = !!(firmaBase64 || selloBase64);
-    const bloqueFirmaOverlay =
+    const bloqueFirmaEnContenido =
       tieneFirmaSello
-        ? `<div class="receta-firma receta-firma--overlay">
+        ? `<div class="receta-firma-contenido">
     <div class="firma-imagenes">
       ${firmaBase64 ? `<img src="${firmaBase64}" alt="" class="firma-img"/>` : ''}
       ${selloBase64 ? `<img src="${selloBase64}" alt="" class="sello-img"/>` : ''}
@@ -1102,11 +1261,8 @@ export class PDFService {
   </div>`
         : '';
 
-    const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/>
-<style>
+    const estilosRecetaBase = `
   * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1e293b; margin: 0; padding: 16mm 14mm; }
   .receta-header { border-bottom: 1px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 12px; }
   .receta-header-row { display: flex; flex-direction: row; align-items: flex-start; gap: 12px; }
   .receta-logo-cell { flex-shrink: 0; display: flex; align-items: flex-start; justify-content: flex-start; }
@@ -1119,80 +1275,212 @@ export class PDFService {
   .receta-titulacion { font-size: 9pt; margin-top: 4px; color: #334155; line-height: 1.35; }
   .receta-meta { font-size: 8.5pt; color: #475569; margin-top: 6px; line-height: 1.4; }
   .receta-fecha { font-size: 9pt; color: #64748b; margin: 10px 0; }
-  .receta-body { min-height: 120mm; position: relative; padding: 8px 0; }
-  .receta-body-inner { position: relative; z-index: 1; white-space: normal; line-height: 1.5; }
-  .receta-body-inner--con-firma { padding-bottom: 22mm; box-sizing: border-box; }
+  .receta-body { min-height: 120mm; position: relative; padding: 8px 0; display: flex; flex-direction: column; }
+  .receta-body--mitad { min-height: 52mm; flex: 1 1 auto; display: flex; flex-direction: column; }
+  .receta-body-inner { position: relative; z-index: 1; white-space: normal; line-height: 1.5; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: stretch; }
+  .receta-body-texto { flex: 1 1 auto; min-height: 0; }
   .receta-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.06; font-size: 72px; font-weight: 800; color: #64748b; pointer-events: none; z-index: 0; }
   .receta-paciente { font-size: 10pt; margin-bottom: 10px; padding: 8px; background: #f8fafc; border-radius: 6px; }
-  .receta-firma--overlay {
-    position: absolute;
-    bottom: 3mm;
-    right: 0;
-    margin: 0;
+  .receta-firma-contenido {
+    flex-shrink: 0;
+    margin-top: auto;
+    margin-bottom: 0;
+    margin-left: 0;
+    margin-right: 0;
     padding: 0;
-    border: none;
-    z-index: 2;
-    pointer-events: none;
-    opacity: 0.88;
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    flex-wrap: nowrap;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .receta-firma--overlay .firma-imagenes {
+  .receta-firma-contenido .firma-imagenes {
     display: flex;
     align-items: flex-end;
     justify-content: flex-end;
     gap: 0.4rem;
     flex-wrap: nowrap;
+    margin: 0;
+    padding: 0;
   }
-  .receta-firma--overlay .firma-img,
-  .receta-firma--overlay .sello-img {
+  .receta-firma-contenido .firma-img,
+  .receta-firma-contenido .sello-img {
     max-width: 95px;
     max-height: 44px;
     width: auto;
     height: auto;
     object-fit: contain;
     vertical-align: bottom;
+    opacity: 0.92;
   }
+  .receta-header--ambos-mitad { border-bottom: 1px solid #cbd5e1; padding-bottom: 8px; margin-bottom: 8px; }
+  .receta-header-row--ambos { justify-content: space-between; align-items: flex-start; width: 100%; }
+  .receta-fecha-emision { text-align: right; font-size: 8.5pt; color: #64748b; line-height: 1.35; flex-shrink: 0; max-width: 50%; }
+  .receta-fecha-emision-lbl { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px; }
+  .receta-fecha-emision-val { font-weight: 600; color: #334155; }
+  .receta-seccion-etiqueta { margin-bottom: 8px; font-size: 10.5pt; }
+  .receta-body-wm-logo {
+    position: absolute;
+    inset: 0;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 48mm auto;
+    opacity: 0.09;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .receta-body--con-logo-wm .receta-body-inner { position: relative; z-index: 1; }
+  .receta-pie-doc { position: relative; margin-top: 4px; padding-top: 8px; border-top: 1px solid #e2e8f0; min-height: 0; }
+  .receta-pie-creds { font-size: 8.5pt; color: #475569; margin-top: 4px; }
+  .receta-meta--pie { margin-top: 4px; font-size: 8pt; }
   .receta-footer { display: flex; gap: 12px; margin-top: 14px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 7.5pt; color: #475569; }
   .pie-col { flex: 1; min-width: 0; }
   .pie-logo { max-height: 40px; max-width: 140px; object-fit: contain; display: block; margin-bottom: 4px; }
   .pie-nombre { font-weight: 600; }
   .pie-dir { line-height: 1.3; margin-top: 2px; }
-</style></head><body>
-  <div class="receta-header">
-    <div class="receta-header-row">
-      <div class="receta-logo-cell">${logoHeaderHtml}</div>
-      <div class="receta-header-main">
-        ${tituloDoc ? `<div class="receta-tipo">${this.escapeHtmlPdf(tituloDoc)}</div>` : ''}
-        <div class="receta-med-nombre">${this.escapeHtmlPdf(tituloMed)} ${this.escapeHtmlPdf(nombreCompleto)}</div>
-        ${lineasTitulacion.map((t: string) => `<div class="receta-titulacion">${this.escapeHtmlPdf(t)}</div>`).join('')}
-        ${!lineasTitulacion.length && medico.nombre_especialidad ? `<div class="receta-titulacion">${this.escapeHtmlPdf(medico.nombre_especialidad)}</div>` : ''}
-        <div class="receta-meta">
-          ${medico.cedula ? `RIF / Cédula: ${this.escapeHtmlPdf(medico.cedula)} · ` : ''}
-          ${medico.email ? `${this.escapeHtmlPdf(medico.email)} · ` : ''}
-          ${medico.telefono ? `${this.escapeHtmlPdf(medico.telefono)}` : ''}
-          ${medico.contacto_redes ? `<br/>${this.escapeHtmlPdf(String(medico.contacto_redes))}` : ''}
-        </div>
-      </div>
-    </div>
+  .receta-ambos-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: stretch;
+    min-height: 0;
+    width: 100%;
+  }
+  .receta-ambos-mitad {
+    flex: 1 1 50%;
+    max-width: 50%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-sizing: border-box;
+    border-right: 1px dashed #94a3b8;
+    padding-right: 8px;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+  .receta-ambos-mitad:last-child {
+    border-right: none;
+    padding-right: 0;
+    padding-left: 8px;
+  }
+  .receta-ambos-mitad .receta-body { min-height: 0; }
+  .receta-ambos-mitad .receta-body--mitad {
+    flex: 1 1 auto;
+    min-height: 50mm;
+    display: flex;
+    flex-direction: column;
+  }
+  .receta-ambos-mitad .receta-pie-doc { margin-top: auto; flex-shrink: 0; }
+  .receta-ambos-mitad .receta-footer {
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .receta-ambos-mitad .receta-logo-fit { max-width: 90px; max-height: 54px; }
+  .receta-ambos-mitad .receta-logo-recipe { max-width: 100%; max-height: 56px; }
+  .receta-ambos-mitad .receta-body-wm-logo { background-size: 36mm auto; }`;
+
+    let html: string;
+    if (usarDosMitadesVerticales) {
+      const innerR = this.htmlRecetaCuerpoPlanoLineas(splitAmbos.recipe);
+      const innerI = this.htmlRecetaCuerpoPlanoLineas(splitAmbos.indicaciones);
+      const wm = headerLogoB64 || '';
+      const mitadR = this.buildRecetaMedicoMitadVertical({
+        tituloPanel: 'Rp.',
+        innerHtml: innerR,
+        fechaStr,
+        bloquePaciente,
+        footerRow,
+        bloqueFirmaEnContenido,
+        tituloMed,
+        logoHeaderHtml,
+        nombreCompleto,
+        lineasTitulacion,
+        medico,
+        watermarkDataUrl: wm
+      });
+      const mitadI = this.buildRecetaMedicoMitadVertical({
+        tituloPanel: 'Indicación',
+        innerHtml: innerI,
+        fechaStr,
+        bloquePaciente: '',
+        footerRow,
+        bloqueFirmaEnContenido,
+        tituloMed,
+        logoHeaderHtml,
+        nombreCompleto,
+        lineasTitulacion,
+        medico,
+        watermarkDataUrl: wm
+      });
+      html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/>
+<style>
+  html, body.receta-ambos-root { height: 100%; margin: 0; }
+  body.receta-ambos-root {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 9.5pt;
+    color: #1e293b;
+    padding: 10mm 8mm;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+  ${estilosRecetaBase}
+</style></head><body class="receta-ambos-root">
+  <div class="receta-ambos-wrap">
+    ${mitadR}
+    ${mitadI}
   </div>
+</body></html>`;
+    } else {
+      const headerCompleto = this.buildRecetaMedicoEncabezadoFragment({
+        tituloDoc,
+        logoHeaderHtml,
+        tituloMed,
+        nombreCompleto,
+        lineasTitulacion,
+        medico
+      });
+      html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1e293b; margin: 0; padding: 16mm 14mm; }
+  ${estilosRecetaBase}
+</style></head><body>
+  ${headerCompleto}
   <div class="receta-fecha">Fecha: ${this.escapeHtmlPdf(fechaStr)}</div>
   ${bloquePaciente}
   <div class="receta-body">
     <div class="receta-watermark">${tituloMed.charAt(0)}</div>
-    <div class="receta-body-inner${tieneFirmaSello ? ' receta-body-inner--con-firma' : ''}">${htmlContenido}</div>
-    ${bloqueFirmaOverlay}
+    <div class="receta-body-inner"><div class="receta-body-texto">${htmlContenido}</div>${bloqueFirmaEnContenido}</div>
   </div>
   ${footerRow}
 </body></html>`;
+    }
 
-    return this.generarPdfBufferDesdeHtml(html);
+    console.log(
+      '[PDF récipe service] HTML listo · length=%d · modoDosColumnasApaisado=%s',
+      html.length,
+      usarDosMitadesVerticales ? 'sí' : 'no'
+    );
+    return this.generarPdfBufferDesdeHtml(html, { landscape: usarDosMitadesVerticales });
   }
 
   /** Puppeteer: HTML → PDF buffer (reutilizable). */
-  private async generarPdfBufferDesdeHtml(html: string): Promise<Buffer> {
+  private async generarPdfBufferDesdeHtml(
+    html: string,
+    opts?: { landscape?: boolean }
+  ): Promise<Buffer> {
     let browser: any = null;
+    const tPup = Date.now();
     try {
+      console.log('[PDF récipe Puppeteer] Lanzando Chromium…');
       browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -1207,15 +1495,20 @@ export class PDFService {
         ],
         timeout: 60000
       });
+      console.log('[PDF récipe Puppeteer] Chromium listo · ms=%d', Date.now() - tPup);
       const page = await browser.newPage();
       page.setDefaultNavigationTimeout(60000);
       page.setDefaultTimeout(60000);
+      console.log('[PDF récipe Puppeteer] setContent (HTML)…');
       await page.setContent(html, { waitUntil: 'load', timeout: 60000 });
+      console.log('[PDF récipe Puppeteer] setContent ok · pausa 1s (imágenes)…');
       /* Misma espera extra que en el PDF del informe (setContent + ~1s) para que imágenes data-URL se pinten en el PDF */
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      console.log('[PDF récipe Puppeteer] page.pdf… landscape=%s', opts?.landscape ? 'sí' : 'no');
       const pdf = await Promise.race([
         page.pdf({
           format: 'A4',
+          landscape: opts?.landscape === true,
           printBackground: true,
           margin: { top: '12mm', right: '12mm', bottom: '12mm', left: '12mm' },
           preferCSSPageSize: false
@@ -1223,11 +1516,13 @@ export class PDFService {
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout generando PDF')), 60000))
       ]) as Buffer;
       const pdfBuffer = Buffer.from(pdf);
+      console.log('[PDF récipe Puppeteer] PDF buffer · bytes=%d · totalMs=%d', pdfBuffer.length, Date.now() - tPup);
       await page.close();
       await browser.close();
       browser = null;
       return pdfBuffer;
     } catch (e: any) {
+      console.error('[PDF récipe Puppeteer] Fallo:', e?.message || e);
       if (browser) {
         try {
           await browser.close();

@@ -1,12 +1,28 @@
 import { Request, Response } from 'express';
 import { AntecedenteTipoService } from '../services/antecedente-tipo.service.js';
 import { ApiResponse } from '../types/index.js';
+import {
+  friendlyAntecedenteMedicoTipoMessage,
+  postgresErrorCode
+} from '../utils/antecedente-medico-tipo-db-message.js';
 
 export class AntecedenteTipoController {
   private service: AntecedenteTipoService;
 
   constructor() {
     this.service = new AntecedenteTipoService();
+  }
+
+  async getCategoriaLabels(_req: Request, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const data = await this.service.getCategoriaLabels();
+      res.json({ success: true, data });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: { message: (error as Error).message }
+      });
+    }
   }
 
   async getAll(_req: Request, res: Response<ApiResponse>): Promise<void> {
@@ -65,6 +81,12 @@ export class AntecedenteTipoController {
       const data = await this.service.create(req.body);
       res.status(201).json({ success: true, data });
     } catch (error) {
+      const friendly = friendlyAntecedenteMedicoTipoMessage(error);
+      if (friendly) {
+        const status = postgresErrorCode(error) === '23505' ? 409 : 400;
+        res.status(status).json({ success: false, error: { message: friendly } });
+        return;
+      }
       res.status(500).json({
         success: false,
         error: { message: (error as Error).message }
@@ -82,6 +104,12 @@ export class AntecedenteTipoController {
       const data = await this.service.update(id, req.body);
       res.json({ success: true, data });
     } catch (error) {
+      const friendly = friendlyAntecedenteMedicoTipoMessage(error);
+      if (friendly) {
+        const status = postgresErrorCode(error) === '23505' ? 409 : 400;
+        res.status(status).json({ success: false, error: { message: friendly } });
+        return;
+      }
       res.status(500).json({
         success: false,
         error: { message: (error as Error).message }

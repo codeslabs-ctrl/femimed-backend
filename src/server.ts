@@ -208,13 +208,18 @@ const startServer = async (): Promise<void> => {
       console.log(`📊 Environment: ${config.nodeEnv}`);
       console.log(`🌐 Listening on: 0.0.0.0:${config.port}`);
       
-      // Local: localhost. Producción: subdominio (ej. cm28839med.codes-labs.com) sin puerto visible (proxy).
-      if (config.nodeEnv === 'production') {
-        const productionUrl = process.env['API_URL'] || 'https://cm28839med.codes-labs.com';
-        console.log(`🔗 API Base URL: ${productionUrl}/api/${config.api.version}`);
-      } else {
-        console.log(`🔗 API Base URL: http://localhost:${config.port}/api/${config.api.version}`);
-        console.log(`🔗 Login endpoint: http://localhost:${config.port}/api/${config.api.version}/auth/login`);
+      // URL pública opcional (config.env): API_URL = origen sin /api (ej. https://femimed.codes-labs.com).
+      // Sin API_URL se asume acceso local (típico con NODE_ENV=production en tu máquina).
+      const apiUrlEnv = (process.env['API_URL'] || '').trim().replace(/\/+$/, '');
+      const publicBase = apiUrlEnv || `http://localhost:${config.port}`;
+      console.log(`🔗 API Base URL: ${publicBase}/api/${config.api.version}`);
+      if (config.nodeEnv === 'production' && !apiUrlEnv) {
+        console.log(
+          '   ℹ️  Para mostrar el dominio real del API, define API_URL en config.env (origen sin /api, ej. https://femimed.codes-labs.com).'
+        );
+      }
+      if (config.nodeEnv === 'development' || !apiUrlEnv) {
+        console.log(`🔗 Login endpoint: ${publicBase}/api/${config.api.version}/auth/login`);
       }
     });
   } catch (error) {
