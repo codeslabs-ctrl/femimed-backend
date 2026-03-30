@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { PatientService } from '../services/patient.service.js';
+import { PatientService, CreatePatientResult } from '../services/patient.service.js';
+import { PatientCedulaExistsError } from '../errors/patient-cedula-exists.error.js';
 import { HistoricoService } from '../services/historico.service.js';
 import { ApiResponse } from '../types/index.js';
 import { postgresPool } from '../config/database.js';
@@ -192,22 +193,91 @@ export class PatientController {
           console.log('⚠️ Backend - Usuario completo:', user);
         }
       
-      const patient = await this.patientService.createPatient(patientData, user?.medico_id);
+      const patient = (await this.patientService.createPatient(
+        patientData,
+        user?.medico_id
+      )) as CreatePatientResult;
       console.log('✅ Backend - Paciente creado exitosamente:', patient);
 
       const response: ApiResponse = {
         success: true,
         data: {
-          message: 'Patient created successfully',
+          message: 'Paciente creado correctamente',
+          linkedExisting: false,
+          alreadyAssociated: false,
           ...patient
         }
       };
       res.status(201).json(response);
     } catch (error) {
+      if (error instanceof PatientCedulaExistsError) {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: { existingPatient: error.existingPatient }
+          }
+        };
+        res.status(409).json(response);
+        return;
+      }
       console.error('❌ Backend - Error creando paciente:', error);
       console.error('❌ Backend - Error message:', (error as Error).message);
       console.error('❌ Backend - Error stack:', (error as Error).stack);
-      
+
+      const response: ApiResponse = {
+        success: false,
+        error: { message: (error as Error).message }
+      };
+      res.status(400).json(response);
+    }
+  }
+
+  async linkPatientToMedicoHistorial(req: AuthenticatedRequest, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const user = (req as any).user;
+      const medicoId = user?.medico_id;
+      if (!medicoId) {
+        res.status(403).json({
+          success: false,
+          error: { message: 'Solo un usuario médico puede vincular pacientes a su historial.' }
+        });
+        return;
+      }
+      const { id } = req.params;
+      if (!id) {
+        res.status(400).json({ success: false, error: { message: 'ID de paciente requerido' } });
+        return;
+      }
+      const body = req.body || {};
+      const patient = (await this.patientService.linkMedicoToPatientById(
+        id,
+        medicoId,
+        {
+          motivo_consulta: body.motivo_consulta,
+          diagnostico: body.diagnostico,
+          conclusiones: body.conclusiones,
+          plan: body.plan
+        }
+      )) as CreatePatientResult;
+
+      const message = patient.alreadyAssociated
+        ? 'Este paciente ya estaba vinculado a su historial'
+        : 'Paciente vinculado a su historial correctamente';
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          message,
+          linkedExisting: true,
+          alreadyAssociated: patient.alreadyAssociated ?? false,
+          ...patient
+        }
+      };
+      res.status(200).json(response);
+    } catch (error) {
+      console.error('❌ Backend - Error vinculando paciente:', error);
       const response: ApiResponse = {
         success: false,
         error: { message: (error as Error).message }

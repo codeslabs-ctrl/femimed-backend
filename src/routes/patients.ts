@@ -38,6 +38,9 @@ router.get('/:id/antecedentes', medicoSecretariaMiddleware, (req: any, res: any)
 router.put('/:id/antecedentes', medicoSecretariaMiddleware, (req: any, res: any) => patientController.saveAntecedentes(req, res));
 router.get('/:id', medicoSecretariaMiddleware, (req: any, res: any) => patientController.getPatientById(req, res));
 router.post('/', medicoSecretariaMiddleware, validatePaciente, (req: any, res: any) => patientController.createPatient(req, res));
+router.post('/:id/link-medico', medicoSecretariaMiddleware, (req: any, res: any) =>
+  patientController.linkPatientToMedicoHistorial(req, res)
+);
 router.put('/:id', medicoSecretariaMiddleware, validatePacienteUpdate, (req: any, res: any) => patientController.updatePatient(req, res));
 router.delete('/:id', adminSecurityMiddleware, (req: any, res: any) => patientController.deletePatient(req, res));
 

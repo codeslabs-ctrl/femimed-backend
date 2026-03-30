@@ -2,6 +2,13 @@ import { PatientRepository, PatientData, PatientRepositoryType } from '../reposi
 import { PaginationInfo } from '../types/index.js';
 import { postgresPool } from '../config/database.js';
 import { checkLimitePacientes } from './parametros-clinica.service.js';
+import { PatientCedulaExistsError } from '../errors/patient-cedula-exists.error.js';
+
+/** Resultado de alta: paciente nuevo o existente vinculado al médico por cédula. */
+export type CreatePatientResult = PatientData & {
+  linkedExisting?: boolean;
+  alreadyAssociated?: boolean;
+};
 
 export class PatientService {
   private patientRepository: InstanceType<PatientRepositoryType>;
@@ -99,7 +106,121 @@ export class PatientService {
     }
   }
 
-  async createPatient(patientData: Omit<PatientData, 'id' | 'fecha_creacion' | 'fecha_actualizacion'>, medicoId?: number): Promise<PatientData> {
+  /**
+   * Si la cédula ya existe y hay `medicoId`, no se duplica `pacientes`:
+   * se inserta (si aplica) `historico_pacientes` con `consulta_id` NULL y `titulo = registro_inicial`.
+   */
+  private async linkMedicoToExistingPatientByCedula(
+    existing: PatientData,
+    patientData: Omit<PatientData, 'id' | 'fecha_creacion' | 'fecha_actualizacion'>,
+    medicoId: number
+  ): Promise<CreatePatientResult> {
+    const clinicaAlias = process.env['CLINICA_ALIAS'];
+    if (!clinicaAlias) {
+      throw new Error('CLINICA_ALIAS no está configurada en las variables de entorno');
+    }
+
+    const pid = existing.id;
+    if (pid === undefined || pid === null) {
+      throw new Error('Paciente existente sin id válido');
+    }
+
+    const { motivo_consulta, diagnostico, conclusiones, plan } = patientData;
+
+    let alreadyAssociated = false;
+    const client = await postgresPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const dup = await client.query(
+        `SELECT id FROM historico_pacientes
+         WHERE paciente_id = $1 AND medico_id = $2
+           AND consulta_id IS NULL
+           AND titulo = 'registro_inicial'
+         LIMIT 1`,
+        [pid, medicoId]
+      );
+      alreadyAssociated = dup.rows.length > 0;
+
+      if (!alreadyAssociated) {
+        await client.query(
+          `INSERT INTO historico_pacientes
+           (paciente_id, medico_id, consulta_id, titulo, motivo_consulta, diagnostico, conclusiones, plan, clinica_alias, fecha_consulta)
+           VALUES ($1, $2, NULL, 'registro_inicial', $3, $4, $5, $6, $7, $8)`,
+          [
+            pid,
+            medicoId,
+            motivo_consulta || null,
+            diagnostico || null,
+            conclusiones || null,
+            plan || null,
+            clinicaAlias,
+            new Date().toISOString()
+          ]
+        );
+        console.log('✅ PatientService - Vínculo médico–paciente creado (cédula existente)');
+      } else {
+        console.log('ℹ️ PatientService - El médico ya tenía registro inicial con este paciente');
+      }
+
+      await client.query('COMMIT');
+    } catch (dbError: unknown) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      console.error('❌ PatientService - Error vinculando paciente existente:', dbError);
+      const msg = dbError instanceof Error ? dbError.message : String(dbError);
+      throw new Error(`No se pudo vincular el paciente: ${msg}`);
+    } finally {
+      client.release();
+    }
+
+    const full = await this.getPatientById(String(pid));
+    if (!full) {
+      throw new Error('No se pudo cargar el paciente tras vincular');
+    }
+    return {
+      ...full,
+      linkedExisting: true,
+      alreadyAssociated
+    };
+  }
+
+  /**
+   * Tras confirmación explícita del médico (POST /patients/:id/link-medico).
+   */
+  async linkMedicoToPatientById(
+    patientId: string | number,
+    medicoId: number,
+    body: Partial<Pick<PatientData, 'motivo_consulta' | 'diagnostico' | 'conclusiones' | 'plan'>> = {}
+  ): Promise<CreatePatientResult> {
+    const existing = await this.patientRepository.findById(String(patientId));
+    if (!existing) {
+      throw new Error('Paciente no encontrado');
+    }
+    const payload = {
+      nombres: existing.nombres,
+      apellidos: existing.apellidos,
+      edad: existing.edad,
+      sexo: existing.sexo as PatientData['sexo'],
+      cedula: existing.cedula,
+      email: existing.email ?? '',
+      telefono: existing.telefono ?? '',
+      remitido_por: existing.remitido_por,
+      motivo_consulta: body.motivo_consulta,
+      diagnostico: body.diagnostico,
+      conclusiones: body.conclusiones,
+      plan: body.plan
+    } as Omit<PatientData, 'id' | 'fecha_creacion' | 'fecha_actualizacion'>;
+    return this.linkMedicoToExistingPatientByCedula(existing, payload, medicoId);
+  }
+
+  async createPatient(
+    patientData: Omit<PatientData, 'id' | 'fecha_creacion' | 'fecha_actualizacion'>,
+    medicoId?: number
+  ): Promise<CreatePatientResult> {
     try {
       console.log('🔍 PatientService - Validando datos del paciente:', patientData);
       
@@ -127,32 +248,47 @@ export class PatientService {
         throw new Error('Sex must be one of: Masculino, Femenino, Otro');
       }
 
-      // Validate email uniqueness
+      const cedulaNorm = patientData.cedula ? String(patientData.cedula).trim() : '';
+      if (cedulaNorm) {
+        const existingByCedula = await this.patientRepository.findByCedulaExact(cedulaNorm);
+        if (existingByCedula) {
+          if (medicoId && existingByCedula.id != null) {
+            const checkClient = await postgresPool.connect();
+            try {
+              const dup = await checkClient.query(
+                `SELECT id FROM historico_pacientes
+                 WHERE paciente_id = $1 AND medico_id = $2
+                   AND consulta_id IS NULL
+                   AND titulo = 'registro_inicial'
+                 LIMIT 1`,
+                [existingByCedula.id, medicoId]
+              );
+              if (dup.rows.length > 0) {
+                throw new Error(
+                  'Este paciente ya está registrado y vinculado a su historial. Busque al paciente en su lista en lugar de crear uno nuevo.'
+                );
+              }
+            } finally {
+              checkClient.release();
+            }
+            throw new PatientCedulaExistsError(existingByCedula);
+          }
+          if (medicoId) {
+            throw new PatientCedulaExistsError(existingByCedula);
+          }
+          throw new Error(
+            'La cédula ya está registrada en el sistema. Busque el paciente existente o use un usuario médico para vincularlo a su historial.'
+          );
+        }
+      }
+
+      // Validate email uniqueness (solo alta de fila nueva en pacientes)
       if (patientData.email) {
         console.log('🔍 PatientService - Verificando unicidad del email:', patientData.email);
         const existingPatientByEmail = await this.patientRepository.findByEmail(patientData.email);
         if (existingPatientByEmail) {
           console.error('❌ PatientService - Email ya existe:', patientData.email);
           throw new Error('El email ya está registrado en el sistema');
-        }
-      }
-
-      // Validate cedula uniqueness
-      if (patientData.cedula) {
-        console.log('🔍 PatientService - Verificando unicidad de la cédula:', patientData.cedula);
-        // PostgreSQL implementation
-        const client = await postgresPool.connect();
-        try {
-          const result = await client.query(
-            'SELECT id FROM pacientes WHERE cedula = $1 LIMIT 1',
-            [patientData.cedula]
-          );
-          if (result.rows.length > 0) {
-            console.error('❌ PatientService - Cédula ya existe:', patientData.cedula);
-            throw new Error('La cédula ya está registrada en el sistema');
-          }
-        } finally {
-          client.release();
         }
       }
 
@@ -185,10 +321,11 @@ export class PatientService {
       try {
         await client.query('BEGIN');
 
-        // Incluir clinica_alias en los datos del paciente
+        // Incluir clinica_alias en los datos del paciente (cédula normalizada si aplica)
         const patientDataWithClinica = {
           ...patientBasicData,
-          clinica_alias: clinicaAlias
+          clinica_alias: clinicaAlias,
+          ...(cedulaNorm ? { cedula: cedulaNorm } : {})
         };
 
         // Crear el paciente usando el repositorio
