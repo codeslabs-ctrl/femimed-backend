@@ -2,8 +2,6 @@ import { PatientRepository, PatientData, PatientRepositoryType } from '../reposi
 import { PaginationInfo } from '../types/index.js';
 import { postgresPool } from '../config/database.js';
 import { checkLimitePacientes } from './parametros-clinica.service.js';
-import { PatientCedulaExistsError } from '../errors/patient-cedula-exists.error.js';
-
 /** Resultado de alta: paciente nuevo o existente vinculado al médico por cédula. */
 export type CreatePatientResult = PatientData & {
   linkedExisting?: boolean;
@@ -93,16 +91,86 @@ export class PatientService {
     }
   }
 
-  async checkEmailAvailability(email: string): Promise<boolean> {
+  /**
+   * true = el email se puede usar en el flujo de alta (no bloquea).
+   * Con médico en sesión: bloqueado solo si el paciente con ese email ya tiene registro_inicial con ese médico.
+   */
+  async checkEmailAvailability(email: string, medicoId?: number | null): Promise<boolean> {
     try {
       const patient = await this.patientRepository.findByEmail(email);
-      return patient === null; // true if available (no patient found), false if not available
+      if (!patient) return true;
+      if (medicoId == null || medicoId === undefined) {
+        return false;
+      }
+      const pid = patient.id;
+      if (pid == null) return false;
+      const linked = await this.hasRegistroInicialLink(Number(pid), medicoId);
+      return !linked;
     } catch (error) {
-      // If error is "not found", email is available
       if (error instanceof Error && error.message.includes('not found')) {
         return true;
       }
       throw new Error(`Failed to check email availability: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Misma lógica que email: disponible si no hay paciente con ese teléfono o si hay médico y aún no está vinculado.
+   */
+  async checkTelefonoAvailability(telefono: string, medicoId?: number | null): Promise<boolean> {
+    const digits = (telefono || '').replace(/\D/g, '');
+    if (digits.length < 10) return true;
+    const list = await this.patientRepository.searchByTelefono(telefono);
+    if (list.length === 0) return true;
+    if (medicoId == null || medicoId === undefined) return false;
+    const first = list[0];
+    if (!first) return true;
+    const pid = first.id;
+    if (pid == null) return false;
+    const linked = await this.hasRegistroInicialLink(Number(pid), medicoId);
+    return !linked;
+  }
+
+  /**
+   * Misma lógica que email/tel: disponible si no hay paciente con esa cédula o si hay médico y aún no hay registro_inicial.
+   */
+  async checkCedulaAvailability(cedula: string, medicoId?: number | null): Promise<boolean> {
+    const cedulaNorm = (cedula || '').trim();
+    if (!cedulaNorm) return true;
+    const patient = await this.patientRepository.findByCedulaExact(cedulaNorm);
+    if (!patient) return true;
+    if (medicoId == null || medicoId === undefined) return false;
+    const pid = patient.id;
+    if (pid == null) return false;
+    const linked = await this.hasRegistroInicialLink(Number(pid), medicoId);
+    return !linked;
+  }
+
+  /** Indica si ya existe vínculo registro_inicial entre paciente y médico. */
+  private async hasRegistroInicialLink(pacienteId: number, medicoId: number): Promise<boolean> {
+    const client = await postgresPool.connect();
+    try {
+      const r = await client.query(
+        `SELECT 1 FROM historico_pacientes
+         WHERE paciente_id = $1 AND medico_id = $2
+           AND consulta_id IS NULL AND titulo = 'registro_inicial'
+         LIMIT 1`,
+        [pacienteId, medicoId]
+      );
+      return r.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Si el formulario trae cédula y el paciente hallado tiene otra, no permitir vincular por email/tel. */
+  private assertCedulaConsistentWithExisting(existing: PatientData, cedulaNorm: string): void {
+    if (!cedulaNorm) return;
+    const ec = existing.cedula ? String(existing.cedula).trim() : '';
+    if (ec && ec !== cedulaNorm) {
+      throw new Error(
+        'La cédula no coincide con el paciente ya registrado con este correo o teléfono.'
+      );
     }
   }
 
@@ -251,30 +319,18 @@ export class PatientService {
       const cedulaNorm = patientData.cedula ? String(patientData.cedula).trim() : '';
       if (cedulaNorm) {
         const existingByCedula = await this.patientRepository.findByCedulaExact(cedulaNorm);
-        if (existingByCedula) {
-          if (medicoId && existingByCedula.id != null) {
-            const checkClient = await postgresPool.connect();
-            try {
-              const dup = await checkClient.query(
-                `SELECT id FROM historico_pacientes
-                 WHERE paciente_id = $1 AND medico_id = $2
-                   AND consulta_id IS NULL
-                   AND titulo = 'registro_inicial'
-                 LIMIT 1`,
-                [existingByCedula.id, medicoId]
-              );
-              if (dup.rows.length > 0) {
-                throw new Error(
-                  'Este paciente ya está registrado y vinculado a su historial. Busque al paciente en su lista en lugar de crear uno nuevo.'
-                );
-              }
-            } finally {
-              checkClient.release();
-            }
-            throw new PatientCedulaExistsError(existingByCedula);
-          }
+        if (existingByCedula && existingByCedula.id != null) {
           if (medicoId) {
-            throw new PatientCedulaExistsError(existingByCedula);
+            if (await this.hasRegistroInicialLink(Number(existingByCedula.id), medicoId)) {
+              throw new Error(
+                'Este paciente ya está registrado y vinculado a su historial. Busque al paciente en su lista en lugar de crear uno nuevo.'
+              );
+            }
+            return await this.linkMedicoToExistingPatientByCedula(
+              existingByCedula,
+              patientData,
+              medicoId
+            );
           }
           throw new Error(
             'La cédula ya está registrada en el sistema. Busque el paciente existente o use un usuario médico para vincularlo a su historial.'
@@ -282,20 +338,41 @@ export class PatientService {
         }
       }
 
-      // Validate email uniqueness (solo alta de fila nueva en pacientes)
       if (patientData.email) {
-        console.log('🔍 PatientService - Verificando unicidad del email:', patientData.email);
+        console.log('🔍 PatientService - Verificando email:', patientData.email);
         const existingPatientByEmail = await this.patientRepository.findByEmail(patientData.email);
-        if (existingPatientByEmail) {
+        if (existingPatientByEmail && existingPatientByEmail.id != null) {
+          if (medicoId) {
+            if (await this.hasRegistroInicialLink(Number(existingPatientByEmail.id), medicoId)) {
+              throw new Error(
+                'El correo ya está registrado y vinculado a su historial. Busque al paciente en su lista.'
+              );
+            }
+            this.assertCedulaConsistentWithExisting(existingPatientByEmail, cedulaNorm);
+            return await this.linkMedicoToExistingPatientByCedula(
+              existingPatientByEmail,
+              patientData,
+              medicoId
+            );
+          }
           console.error('❌ PatientService - Email ya existe:', patientData.email);
           throw new Error('El email ya está registrado en el sistema');
         }
       }
 
-      // Validate telefono uniqueness
       if (patientData.telefono && String(patientData.telefono).replace(/\D/g, '').length >= 10) {
         const existingByTelefono = await this.patientRepository.searchByTelefono(patientData.telefono);
         if (existingByTelefono.length > 0) {
+          const ex = existingByTelefono[0]!;
+          if (ex.id != null && medicoId) {
+            if (await this.hasRegistroInicialLink(Number(ex.id), medicoId)) {
+              throw new Error(
+                'El teléfono ya está registrado y vinculado a su historial. Busque al paciente en su lista.'
+              );
+            }
+            this.assertCedulaConsistentWithExisting(ex, cedulaNorm);
+            return await this.linkMedicoToExistingPatientByCedula(ex, patientData, medicoId);
+          }
           console.error('❌ PatientService - Teléfono ya existe:', patientData.telefono);
           throw new Error('El teléfono ya está registrado en el sistema');
         }

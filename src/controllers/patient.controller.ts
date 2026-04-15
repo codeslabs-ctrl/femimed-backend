@@ -960,11 +960,44 @@ export class PatientController {
         return;
       }
 
-      const isAvailable = await this.patientService.checkEmailAvailability(email);
+      const medicoId = (req as AuthenticatedRequest).user?.medico_id;
+      const isAvailable = await this.patientService.checkEmailAvailability(email, medicoId);
       
-      res.json({ exists: !isAvailable }); // exists: true if email is taken, false if available
+      res.json({ exists: !isAvailable }); // exists: true if blocked for this user
     } catch (error) {
       console.error('Error checking email availability:', error);
+      res.status(500).json({ exists: false });
+    }
+  }
+
+  async checkTelefonoAvailability(req: AuthenticatedRequest, res: Response<{exists: boolean}>): Promise<void> {
+    try {
+      const { telefono } = req.query;
+      if (!telefono || typeof telefono !== 'string') {
+        res.status(400).json({ exists: false });
+        return;
+      }
+      const medicoId = (req as AuthenticatedRequest).user?.medico_id;
+      const isAvailable = await this.patientService.checkTelefonoAvailability(telefono, medicoId);
+      res.json({ exists: !isAvailable });
+    } catch (error) {
+      console.error('Error checking telefono availability:', error);
+      res.status(500).json({ exists: false });
+    }
+  }
+
+  async checkCedulaAvailability(req: AuthenticatedRequest, res: Response<{ exists: boolean }>): Promise<void> {
+    try {
+      const { cedula } = req.query;
+      if (!cedula || typeof cedula !== 'string') {
+        res.status(400).json({ exists: false });
+        return;
+      }
+      const medicoId = (req as AuthenticatedRequest).user?.medico_id;
+      const isAvailable = await this.patientService.checkCedulaAvailability(cedula, medicoId);
+      res.json({ exists: !isAvailable });
+    } catch (error) {
+      console.error('Error checking cedula availability:', error);
       res.status(500).json({ exists: false });
     }
   }

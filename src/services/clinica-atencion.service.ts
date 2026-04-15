@@ -4,6 +4,9 @@ export interface ClinicaAtencion {
   id: number;
   nombre_clinica: string;
   direccion_clinica: string | null;
+  /** WGS84; opcional. Con longitud permite enlace a mapas en correos. */
+  latitud: number | null;
+  longitud: number | null;
   logo_path: string | null;
   logo_path_recipe: string | null;
   activo: boolean;
@@ -14,6 +17,8 @@ export interface ClinicaAtencion {
 export interface CreateClinicaAtencionInput {
   nombre_clinica: string;
   direccion_clinica?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
   logo_path?: string | null;
   logo_path_recipe?: string | null;
   activo?: boolean;
@@ -24,8 +29,8 @@ export class ClinicaAtencionService {
     const client = await postgresPool.connect();
     try {
       const sql = activosOnly
-        ? 'SELECT id, nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes WHERE activo = true ORDER BY nombre_clinica'
-        : 'SELECT id, nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes ORDER BY nombre_clinica';
+        ? 'SELECT id, nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes WHERE activo = true ORDER BY nombre_clinica'
+        : 'SELECT id, nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes ORDER BY nombre_clinica';
       const result = await client.query(sql);
       return result.rows;
     } finally {
@@ -37,7 +42,7 @@ export class ClinicaAtencionService {
     const client = await postgresPool.connect();
     try {
       const result = await client.query(
-        'SELECT id, nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes WHERE id = $1',
+        'SELECT id, nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion FROM clinica_atencion_pacientes WHERE id = $1',
         [id]
       );
       return result.rows[0] || null;
@@ -64,8 +69,16 @@ export class ClinicaAtencionService {
     const client = await postgresPool.connect();
     try {
       const result = await client.query(
-        'INSERT INTO clinica_atencion_pacientes (nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id, nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion',
-        [data.nombre_clinica, data.direccion_clinica ?? null, data.logo_path ?? null, data.logo_path_recipe ?? null, data.activo !== false]
+        'INSERT INTO clinica_atencion_pacientes (nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id, nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion',
+        [
+          data.nombre_clinica,
+          data.direccion_clinica ?? null,
+          data.latitud ?? null,
+          data.longitud ?? null,
+          data.logo_path ?? null,
+          data.logo_path_recipe ?? null,
+          data.activo !== false
+        ]
       );
       return result.rows[0];
     } finally {
@@ -81,6 +94,8 @@ export class ClinicaAtencionService {
       let i = 1;
       if (data.nombre_clinica !== undefined) { updates.push('nombre_clinica = $' + i++); values.push(data.nombre_clinica); }
       if (data.direccion_clinica !== undefined) { updates.push('direccion_clinica = $' + i++); values.push(data.direccion_clinica); }
+      if (data.latitud !== undefined) { updates.push('latitud = $' + i++); values.push(data.latitud); }
+      if (data.longitud !== undefined) { updates.push('longitud = $' + i++); values.push(data.longitud); }
       if (data.logo_path !== undefined) { updates.push('logo_path = $' + i++); values.push(data.logo_path); }
       if (data.logo_path_recipe !== undefined) { updates.push('logo_path_recipe = $' + i++); values.push(data.logo_path_recipe); }
       if (data.activo !== undefined) { updates.push('activo = $' + i++); values.push(data.activo); }
@@ -88,7 +103,7 @@ export class ClinicaAtencionService {
       updates.push('fecha_actualizacion = CURRENT_TIMESTAMP');
       values.push(id);
       const result = await client.query(
-        'UPDATE clinica_atencion_pacientes SET ' + updates.join(', ') + ' WHERE id = $' + i + ' RETURNING id, nombre_clinica, direccion_clinica, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion',
+        'UPDATE clinica_atencion_pacientes SET ' + updates.join(', ') + ' WHERE id = $' + i + ' RETURNING id, nombre_clinica, direccion_clinica, latitud, longitud, logo_path, logo_path_recipe, activo, fecha_creacion, fecha_actualizacion',
         values
       );
       return result.rows[0] || null;

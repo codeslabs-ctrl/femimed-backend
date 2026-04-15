@@ -2,6 +2,24 @@ import { Request, Response } from 'express';
 import clinicaAtencionService from '../services/clinica-atencion.service.js';
 import { ApiResponse } from '../types/index.js';
 
+function parseOptionalCoord(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+/** null si OK; mensaje de error si inválido. */
+function validateCoordPair(lat: number | null, lng: number | null): string | null {
+  if ((lat === null) !== (lng === null)) {
+    return 'latitud y longitud deben enviarse juntas o omitirse';
+  }
+  if (lat === null) return null;
+  if (lat < -90 || lat > 90) return 'latitud debe estar entre -90 y 90';
+  if (lng! < -180 || lng! > 180) return 'longitud debe estar entre -180 y 180';
+  return null;
+}
+
 export class ClinicaAtencionController {
   list = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -40,9 +58,18 @@ export class ClinicaAtencionController {
         res.status(400).json({ success: false, error: { message: 'nombre_clinica es requerido' } });
         return;
       }
+      const latitud = parseOptionalCoord(req.body?.latitud);
+      const longitud = parseOptionalCoord(req.body?.longitud);
+      const coordErr = validateCoordPair(latitud, longitud);
+      if (coordErr) {
+        res.status(400).json({ success: false, error: { message: coordErr } });
+        return;
+      }
       const created = await clinicaAtencionService.create({
         nombre_clinica: nombre_clinica.trim(),
         direccion_clinica: direccion_clinica ?? null,
+        latitud,
+        longitud,
         logo_path: logo_path ?? null,
         logo_path_recipe: logo_path_recipe ?? null,
         activo
@@ -73,6 +100,23 @@ export class ClinicaAtencionController {
       if (logo_path !== undefined) data['logo_path'] = logo_path;
       if (logo_path_recipe !== undefined) data['logo_path_recipe'] = logo_path_recipe;
       if (activo !== undefined) data['activo'] = activo;
+      const hasLat = Object.prototype.hasOwnProperty.call(body, 'latitud');
+      const hasLng = Object.prototype.hasOwnProperty.call(body, 'longitud');
+      if (hasLat || hasLng) {
+        if (!hasLat || !hasLng) {
+          res.status(400).json({ success: false, error: { message: 'latitud y longitud deben enviarse juntas' } });
+          return;
+        }
+        const latitud = parseOptionalCoord(body['latitud']);
+        const longitud = parseOptionalCoord(body['longitud']);
+        const coordErr = validateCoordPair(latitud, longitud);
+        if (coordErr) {
+          res.status(400).json({ success: false, error: { message: coordErr } });
+          return;
+        }
+        data['latitud'] = latitud;
+        data['longitud'] = longitud;
+      }
       const updated = await clinicaAtencionService.update(id, data as any);
       if (!updated) {
         res.status(404).json({ success: false, error: { message: 'No encontrado' } });

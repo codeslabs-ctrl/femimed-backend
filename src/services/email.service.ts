@@ -218,6 +218,10 @@ export class EmailService {
       direccionClinica?: string;
       bloqueDireccion?: string;
       nombreClinica?: string;
+      /** HTML: enlace a mapas (también incluido en bloqueDireccion al paciente). */
+      bloqueMaps?: string;
+      /** Texto plano: línea con URL de mapas. */
+      textoLineaMaps?: string;
     }
   ): Promise<{ paciente: boolean; medico: boolean }> {
     const results = { paciente: false, medico: false };
@@ -258,6 +262,11 @@ export class EmailService {
       motivo: string;
       tipo: string;
       observaciones?: string;
+      nombreClinica?: string;
+      direccionClinica?: string;
+      bloqueDireccion?: string;
+      bloqueMaps?: string;
+      textoLineaMaps?: string;
     }
   ): Promise<{ paciente: boolean; medico: boolean }> {
     const results = { paciente: false, medico: false };
@@ -559,6 +568,7 @@ export class EmailService {
         Observaciones: {{observaciones}}
         Lugar de atención: {{nombreClinica}}
         Dirección: {{direccionClinica}}
+        {{textoLineaMaps}}
         
         Importante:
         - Llegue 15 minutos antes
@@ -721,6 +731,7 @@ export class EmailService {
                 <p><strong>Observaciones:</strong> {{observaciones}}</p>
                 <p><strong>Lugar de atención:</strong> {{nombreClinica}}</p>
                 <p><strong>Dirección:</strong> {{direccionClinica}}</p>
+                {{bloqueMaps}}
               </div>
               
               <p>Puede revisar todos sus pacientes en el sistema.</p>
@@ -1406,6 +1417,8 @@ export class EmailService {
                 </div>
               </div>
               
+              {{bloqueDireccion}}
+              
               <div style="margin: 20px 0;">
                 <p><strong>Importante:</strong></p>
                 <ul>
@@ -1442,6 +1455,10 @@ export class EmailService {
         - Motivo: {{motivo}}
         - Tipo: {{tipo}}
         - Observaciones: {{observaciones}}
+        
+        Lugar de atención: {{nombreClinica}}
+        Dirección: {{direccionClinica}}
+        {{textoLineaMaps}}
         
         Importante:
         - Llegue 15 minutos antes de su nueva cita
@@ -1533,6 +1550,8 @@ export class EmailService {
                 </div>
               </div>
               
+              {{bloqueDireccion}}
+              
               <div style="margin: 20px 0;">
                 <p><strong>Acciones recomendadas:</strong></p>
                 <ul>
@@ -1569,6 +1588,10 @@ export class EmailService {
         - Motivo: {{motivo}}
         - Tipo: {{tipo}}
         - Observaciones: {{observaciones}}
+        
+        Lugar de atención: {{nombreClinica}}
+        Dirección: {{direccionClinica}}
+        {{textoLineaMaps}}
         
         Acciones recomendadas:
         - Actualizar su agenda médica con la nueva fecha/hora

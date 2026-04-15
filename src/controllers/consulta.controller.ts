@@ -3,7 +3,7 @@ import { postgresPool } from '../config/database.js';
 import { ApiResponse } from '../types/index.js';
 import { EmailService } from '../services/email.service.js';
 import menuService from '../services/menu.service.js';
-import clinicaAtencionService from '../services/clinica-atencion.service.js';
+import clinicaAtencionService, { ClinicaAtencion } from '../services/clinica-atencion.service.js';
 
 const VENEZUELA_TZ = 'America/Caracas';
 
@@ -34,6 +34,38 @@ export class ConsultaController {
     const period = h >= 12 ? 'PM' : 'AM';
     const h12 = h % 12 || 12;
     return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+  }
+
+  /**
+   * Texto y HTML de lugar de atención para correos (dirección + enlace a mapas si hay coordenadas).
+   */
+  static buildClinicaEmailLocation(clinica: ClinicaAtencion | null): {
+    nombreClinica: string;
+    direccionClinica: string;
+    bloqueDireccion: string;
+    bloqueMaps: string;
+    textoLineaMaps: string;
+  } {
+    if (!clinica) {
+      return { nombreClinica: '', direccionClinica: '', bloqueDireccion: '', bloqueMaps: '', textoLineaMaps: '' };
+    }
+    const nombreClinica = clinica.nombre_clinica || '';
+    const direccionClinica = clinica.direccion_clinica || '';
+    const lat = clinica.latitud != null ? Number(clinica.latitud) : NaN;
+    const lng = clinica.longitud != null ? Number(clinica.longitud) : NaN;
+    let bloqueMaps = '';
+    let textoLineaMaps = '';
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const url = `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`;
+      bloqueMaps = `<p><a href="${url}" target="_blank" rel="noopener noreferrer">📍 Abrir ubicación en Google Maps</a></p>`;
+      textoLineaMaps = `Ubicación en mapas: ${url}`;
+    }
+    const partAddress =
+      nombreClinica || direccionClinica
+        ? `<p><strong>Lugar de atención:</strong> ${nombreClinica || '—'}</p>${direccionClinica ? `<p><strong>Dirección:</strong> ${direccionClinica}</p>` : ''}`
+        : '';
+    const bloqueDireccion = partAddress + bloqueMaps;
+    return { nombreClinica, direccionClinica, bloqueDireccion, bloqueMaps, textoLineaMaps };
   }
 
   // Obtener todas las consultas con filtros
@@ -746,19 +778,12 @@ export class ConsultaController {
             const observaciones = (consulta.observaciones || consultaData.observaciones || '').trim();
             const fechaPautada = consulta.fecha_pautada ?? consultaData.fecha_pautada;
             const duracionEstimada = consulta.duracion_estimada ?? consultaData.duracion_estimada ?? 30;
-            let nombreClinica = '';
-            let direccionClinica = '';
             const capId = consulta.clinica_atencion_id ?? consultaData.clinica_atencion_id;
+            let clinicaAtencion: ClinicaAtencion | null = null;
             if (capId) {
-              const clinicaAtencion = await clinicaAtencionService.getById(capId);
-              if (clinicaAtencion) {
-                nombreClinica = clinicaAtencion.nombre_clinica || '';
-                direccionClinica = clinicaAtencion.direccion_clinica || '';
-              }
+              clinicaAtencion = await clinicaAtencionService.getById(capId);
             }
-            const bloqueDireccion = (nombreClinica || direccionClinica)
-              ? `<p><strong>Lugar de atención:</strong> ${nombreClinica || '—'}</p>${direccionClinica ? `<p><strong>Dirección:</strong> ${direccionClinica}</p>` : ''}`
-              : '';
+            const loc = ConsultaController.buildClinicaEmailLocation(clinicaAtencion);
             const consultaInfo = {
               pacienteNombre: `${pacienteData.nombres} ${pacienteData.apellidos}`,
               medicoNombre: `${medicoData.nombres} ${medicoData.apellidos}`,
@@ -769,9 +794,11 @@ export class ConsultaController {
               tipo: consultaData.tipo_consulta,
               duracion: duracionEstimada,
               observaciones: observaciones || '—',
-              nombreClinica: nombreClinica || '—',
-              direccionClinica,
-              bloqueDireccion
+              nombreClinica: loc.nombreClinica || '—',
+              direccionClinica: loc.direccionClinica,
+              bloqueDireccion: loc.bloqueDireccion,
+              bloqueMaps: loc.bloqueMaps,
+              textoLineaMaps: loc.textoLineaMaps
             };
 
             // Enviar emails en paralelo
@@ -1337,6 +1364,7 @@ export class ConsultaController {
             cp.fecha_pautada,
             cp.hora_pautada,
             cp.observaciones,
+            cp.clinica_atencion_id,
             p.nombres as paciente_nombres,
             p.apellidos as paciente_apellidos,
             p.email as paciente_email,
@@ -1359,6 +1387,12 @@ export class ConsultaController {
           const tituloMed = sexoMed === 'femenino' ? 'Dra.' : 'Dr.';
           const medicoTituloNombre = `${tituloMed} ${consultaCompleta.medico_nombres} ${consultaCompleta.medico_apellidos}`.trim();
           const observacionesReagendar = (consultaCompleta.observaciones || consulta?.observaciones || '').trim();
+          const capReag = consultaCompleta.clinica_atencion_id;
+          let clinicaReag: ClinicaAtencion | null = null;
+          if (capReag) {
+            clinicaReag = await clinicaAtencionService.getById(capReag);
+          }
+          const locReag = ConsultaController.buildClinicaEmailLocation(clinicaReag);
           const emailService = new EmailService();
           const emailData = {
             pacienteNombre: `${consultaCompleta.paciente_nombres} ${consultaCompleta.paciente_apellidos}`,
@@ -1370,7 +1404,12 @@ export class ConsultaController {
             horaNueva: ConsultaController.formatHoraAMPM(consultaCompleta.hora_pautada),
             motivo: consultaCompleta.motivo_consulta,
             tipo: consultaCompleta.tipo_consulta,
-            observaciones: observacionesReagendar || '—'
+            observaciones: observacionesReagendar || '—',
+            nombreClinica: locReag.nombreClinica || '—',
+            direccionClinica: locReag.direccionClinica,
+            bloqueDireccion: locReag.bloqueDireccion,
+            bloqueMaps: locReag.bloqueMaps,
+            textoLineaMaps: locReag.textoLineaMaps
           };
 
           try {
